@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 // Import for IOFSwitchService
 import net.floodlightcontroller.core.internal.IOFSwitchService;
 import net.floodlightcontroller.core.module.IFloodlightService;
+import net.floodlightcontroller.resruleinstaller.IpAddrGenerator;
 
 public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, IOFSwitchListener {
     
@@ -145,6 +146,34 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }
 
         return flowMods;
+    }
+
+    public void deleteAllFlows(DatapathId switchId) {
+    IOFSwitch sw = switchService.getSwitch(switchId);
+    if (sw == null) {
+        logger.error("Switch {} not found!", switchId);
+        return;
+    }
+
+    OFFactory factory = sw.getOFFactory();
+    
+    // Create a match that matches all flows (wildcard match)
+    Match match = factory.buildMatch().build();
+
+    // Build the flow delete message
+    OFFlowDelete flowDelete = factory.buildFlowDelete()
+            .setMatch(match)
+            .setTableId(TableId.ALL) // Apply to all tables
+            .setOutPort(OFPort.ANY)  // Match any output port
+            .setOutGroup(OFGroup.ANY) // Match any group
+            .setCookie(U64.ZERO) // Match all cookies
+            .setCookieMask(U64.ZERO) // Don't mask cookie
+            .setBufferId(OFBufferId.NO_BUFFER)
+            .build();
+
+    // Send the flow delete message to the switch
+    sw.write(flowDelete);
+    logger.info("Sent delete all flows command to switch {}", switchId);
     }
 
     //installs the flow rules of a given resolution
