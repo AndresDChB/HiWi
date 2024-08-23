@@ -1,3 +1,0 @@
-[submodule "floodlight"]
-	path = floodlight
-	url = https://github.com/floodlight/floodlight.git
