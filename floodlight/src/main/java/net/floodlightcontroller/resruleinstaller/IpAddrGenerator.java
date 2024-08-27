@@ -80,14 +80,33 @@ public class IpAddrGenerator {
         return intToIp(fullMask);
     }
 
-    public static void main(String[] args) {
-        // Example usage
-        int n = 24;
-        String[] ips = generateIps(n);
-        for (String ip : ips) {
-            System.out.println(ip);
-        }
+    //TODO test this
+    public static String[] drillDown(int n, String subnet, boolean src) {
+        //We'll assume the subnet is correct
+        List<String> drillDownAddresses =  new ArrayList<>();
+        // Parse the subnet to get the base IP and the original mask
+        String[] subnetParts = subnet.split("/");
+        String baseIp = subnetParts[0];
+        int originalMask = Integer.parseInt(subnetParts[1]);
 
-        System.out.println("Mask: " + generateMask(n));
+        // Calculate the new mask
+        int newMask = originalMask + (int) (Math.log(n) / Math.log(2));
+
+        // Calculate the base IP in integer format
+        int baseIpInt = ipToInt(baseIp);
+        
+        // Number of addresses in the original subnet
+        int originalSubnetSize = 1 << (32 - originalMask);
+    
+        // Number of addresses in each new subnet
+        int newSubnetSize = 1 << (32 - newMask);
+        
+        // Generate all the new subnets
+        for (int i = 0; i < n; i++) {
+            int subnetIpInt = baseIpInt + (i * newSubnetSize);
+            String newSubnet = intToIp(subnetIpInt) + "/" + newMask;
+            drillDownAddresses.add(newSubnet);
+        }
+        return drillDownAddresses.toArray(new String[drillDownAddresses.size()]);
     }
 }

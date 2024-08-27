@@ -1,52 +1,71 @@
 package net.floodlightcontroller.resruleinstaller;
-
-// Import for Floodlight services and modules
+ 
+import java.util.Collections;
+import java.util.Collection;
+import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.*;
+import java.util.concurrent.*;
+import java.text.DecimalFormat;
+import java.io.IOException;
+ 
+import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IOFMessageListener;
-import net.floodlightcontroller.core.IFloodlightProviderService;
-import net.floodlightcontroller.core.module.IFloodlightModule;
+import net.floodlightcontroller.core.IOFSwitch;
+import net.floodlightcontroller.core.IOFSwitchListener;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
-import net.floodlightcontroller.core.IOFSwitchListener;
-import net.floodlightcontroller.core.IOFSwitch;
-import net.floodlightcontroller.core.IListener.Command;
-import net.floodlightcontroller.core.FloodlightContext;
-import net.floodlightcontroller.core.PortChangeType;
+import net.floodlightcontroller.core.module.IFloodlightModule;
+import net.floodlightcontroller.core.module.IFloodlightService;
+import net.floodlightcontroller.core.internal.IOFSwitchService;
+import com.google.common.util.concurrent.ListenableFuture;
 
-// Imports for OpenFlow
-import org.projectfloodlight.openflow.protocol.OFBarrierRequest;
-import org.projectfloodlight.openflow.protocol.OFMessage;
-import org.projectfloodlight.openflow.protocol.OFFlowAdd;
-import org.projectfloodlight.openflow.protocol.OFType;
-import org.projectfloodlight.openflow.protocol.match.MatchField;
+import org.projectfloodlight.openflow.protocol.OFActionType;
+import org.projectfloodlight.openflow.protocol.OFCapabilities;
+import org.projectfloodlight.openflow.protocol.OFControllerRole;
 import org.projectfloodlight.openflow.protocol.OFFactory;
-import org.projectfloodlight.openflow.protocol.OFStatsRequest;
+import org.projectfloodlight.openflow.protocol.OFMessage;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
+import org.projectfloodlight.openflow.protocol.OFRequest;
+import org.projectfloodlight.openflow.protocol.OFStatsReply;
+import org.projectfloodlight.openflow.protocol.OFFlowStatsRequest;
+import org.projectfloodlight.openflow.protocol.OFFlowStatsReply;
+import org.projectfloodlight.openflow.protocol.OFFlowStatsEntry;
+import org.projectfloodlight.openflow.protocol.OFStatsRequest;
+import org.projectfloodlight.openflow.protocol.OFFlowAdd;
+import org.projectfloodlight.openflow.protocol.match.Match;
+import org.projectfloodlight.openflow.protocol.match.MatchField;
+import org.projectfloodlight.openflow.protocol.OFBarrierRequest;
+import org.projectfloodlight.openflow.protocol.OFBarrierReply;
+import org.projectfloodlight.openflow.protocol.OFMessage;
+import org.projectfloodlight.openflow.protocol.OFType;
+import org.projectfloodlight.openflow.protocol.OFFlowDelete;
+import org.projectfloodlight.openflow.protocol.OFFlowDelete.Builder;
 import org.projectfloodlight.openflow.types.*;
 
+import net.floodlightcontroller.core.IFloodlightProviderService;
+import net.floodlightcontroller.packet.Ethernet;
 
-// Imports for Java collections and utilities
-import java.util.Collection;
-import java.util.Collections;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
-// Logging
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.projectfloodlight.openflow.protocol.OFPortDesc;
+import net.floodlightcontroller.core.PortChangeType;
 
-// Import for IOFSwitchService
-import net.floodlightcontroller.core.internal.IOFSwitchService;
-import net.floodlightcontroller.core.module.IFloodlightService;
-import net.floodlightcontroller.resruleinstaller.IpAddrGenerator;
-
+import csvwriter.CSVWriter;
+ 
 public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, IOFSwitchListener {
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
     private int res;
-
+    private long sendingTime = 0;
+    private boolean flowsSent = false;
+    private int measurements = 1;
+    private boolean write = false;
+    ExecutorService executor = Executors.newFixedThreadPool(1);
 
     @Override
     public String getName() {
@@ -92,8 +111,14 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
         switchService = context.getServiceImpl(IOFSwitchService.class);
         logger = LoggerFactory.getLogger(ResRuleInstaller.class);
-        res = 4;
+        res = 2;
         logger.info("Rule installer initiated");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("Shutdown hook triggered. Shutting down executor...");
+            executor.shutdownNow(); // This interrupts running tasks
+            Thread.currentThread().interrupt();
+            System.out.println("Shutdown complete.");
+        }));
         
     }
  
@@ -105,16 +130,109 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
  
     @Override
     public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
-        logger.info("Message received of type {}",msg.getType());
+        logger.info("Message received of type: {}", msg.getType());
+
+        if (flowsSent) {
+            OFBarrierReply barrierReply = (OFBarrierReply) msg;
+            long receptionTime = System.nanoTime();
+            long instTimeNano = receptionTime - sendingTime;
+            double instTimeSeconds = (double)instTimeNano/1000000000;
+            logger.info("Barrier reply received after {} seconds", instTimeSeconds);
+            logger.info("Reception time: {}", receptionTime);
+
+            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+            String instTimeString = decimalFormat.format(instTimeSeconds);
+            String[] resAndInstLat = new String[]{String.valueOf(res), instTimeString};
+            String newData = CSVWriter.convertToCSV(resAndInstLat);
+            try {
+                CSVWriter.writeToCsv("~/floodlight/results/install_latency.csv", newData, write);
+            }
+            catch (IOException e) {
+                logger.info("CSV Writer fn exploded lfmao");
+            }
+        }
+
         return Command.CONTINUE; // Continue with the next listener
     }
 
     @Override 
     public void switchAdded(DatapathId switchId){
         logger.info("Switch added");
-        installFlows(switchId, res);
+        Runnable flowInstRunnable = new Runnable() {
+            @Override
+            public void run() {
+                flowInstallLoop(switchId);
+            }
+        };
+        Future<?> future = executor.submit(flowInstRunnable); 
+    }
+
+    //Installs and uninstalls flow rules in a loop to gather install latency information
+    public void flowInstallLoop(DatapathId switchId) {
+
+        int waitTime = 3;
+        try {
+            TimeUnit.SECONDS.sleep(waitTime); 
+        }
+        catch(InterruptedException e) { 
+            logger.error("Initial wait time failed");
+        }
+
+        for (int i = 0; i < measurements; i++) {
+            deleteAllFlows(switchId);
+            //Wait for flow deletion
+            try {
+                TimeUnit.SECONDS.sleep(waitTime); 
+            }
+            catch(InterruptedException e) { 
+                logger.error("Wait time after deleting failed");
+            }
+
+            installFlows(switchId);
+
+            //Wait for flow installation
+            try {
+                TimeUnit.SECONDS.sleep(waitTime); 
+            }
+            catch(InterruptedException e) {
+                logger.error("Wait time after installing failed");
+            }
+        }
+        logger.info("Measurements done");
     }
     
+    public void deleteAllFlows(DatapathId switchId) {
+        IOFSwitch sw = switchService.getSwitch(switchId);
+        if (sw == null) {
+            logger.error("Switch {} not found!", switchId);
+            return;
+        }
+    
+        OFFactory factory = sw.getOFFactory();
+        
+        // Create a match that matches all flows (wildcard match)
+        Match match = factory.buildMatch().build();
+    
+        // Build the flow delete message
+        OFFlowDelete flowDelete = factory.buildFlowDelete()
+                .setMatch(match)
+                .setTableId(TableId.ALL) // Apply to all tables
+                .setOutPort(OFPort.ANY)  // Match any output port
+                .setOutGroup(OFGroup.ANY) // Match any group
+                .setCookie(U64.ZERO) // Match all cookies
+                .setCookieMask(U64.ZERO) // Don't mask cookie
+                .setBufferId(OFBufferId.NO_BUFFER)
+                .build();
+    
+        // Send the flow delete message to the switch
+        sw.write(flowDelete);
+        logger.info("Sent delete all flows command to switch {}", switchId);
+        OFBarrierRequest barrierRequest = sw.getOFFactory().buildBarrierRequest().build();
+        flowsSent = false; //reset state
+        sw.write(barrierRequest);
+        
+    }
+
     private List<OFMessage> createMatches(String[] IPs, IOFSwitch sw) {
 
         List<OFMessage> flowMods = new ArrayList<>();
@@ -148,36 +266,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         return flowMods;
     }
 
-    public void deleteAllFlows(DatapathId switchId) {
-    IOFSwitch sw = switchService.getSwitch(switchId);
-    if (sw == null) {
-        logger.error("Switch {} not found!", switchId);
-        return;
-    }
-
-    OFFactory factory = sw.getOFFactory();
-    
-    // Create a match that matches all flows (wildcard match)
-    Match match = factory.buildMatch().build();
-
-    // Build the flow delete message
-    OFFlowDelete flowDelete = factory.buildFlowDelete()
-            .setMatch(match)
-            .setTableId(TableId.ALL) // Apply to all tables
-            .setOutPort(OFPort.ANY)  // Match any output port
-            .setOutGroup(OFGroup.ANY) // Match any group
-            .setCookie(U64.ZERO) // Match all cookies
-            .setCookieMask(U64.ZERO) // Don't mask cookie
-            .setBufferId(OFBufferId.NO_BUFFER)
-            .build();
-
-    // Send the flow delete message to the switch
-    sw.write(flowDelete);
-    logger.info("Sent delete all flows command to switch {}", switchId);
-    }
-
     //installs the flow rules of a given resolution
-    public void installFlows(DatapathId switchId,  int res){
+    //TODO higher resolutions lead to table full errors
+    public void installFlows(DatapathId switchId){
         
         IOFSwitch sw = switchService.getSwitch(switchId);
         
@@ -188,11 +279,34 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         String[] IPs = IpAddrGenerator.generateIps(res);
         List<OFMessage> flowMods = createMatches(IPs, sw);
 
-        sw.write(flowMods);
-        logger.info("Flow rules sent");
+        int flowBatchSize = flowMods.size();
+
+        logger.info("Flowbatch size: " + flowBatchSize);
+
+        List<List<OFMessage>> batches = splitList(flowMods);
+
+        sendingTime = System.nanoTime();
+
+        for (List<OFMessage> batch : batches) {
+            sw.write(batch);
+        }
+        logger.info("Flow rules sent to {}, sending time: {}", switchId, sendingTime);
         OFBarrierRequest barrierRequest = sw.getOFFactory().buildBarrierRequest().build();
+        flowsSent = true;
         sw.write(barrierRequest);
 
+    }
+
+    private <T> List<List<T>> splitList(List<T> originalList) {
+        List<List<T>> sublists = new ArrayList<>();
+        int size = originalList.size();
+        int chunkSize = (res == 64) ? 1 : 512;
+        
+        for (int i = 0; i < size; i += chunkSize) {
+            sublists.add(new ArrayList<>(originalList.subList(i, Math.min(size, i + chunkSize))));
+        }
+        
+        return sublists;
     }
 
     
@@ -226,4 +340,3 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
  
 }
-
