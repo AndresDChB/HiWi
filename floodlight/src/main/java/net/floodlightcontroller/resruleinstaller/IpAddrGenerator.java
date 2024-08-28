@@ -3,6 +3,8 @@ package net.floodlightcontroller.resruleinstaller;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 public class IpAddrGenerator {
 
@@ -63,7 +65,7 @@ public class IpAddrGenerator {
         String[] ipAddresses = new String[ipNumbers.length];
 
         for (int i = 0; i < ipNumbers.length; i++) {
-            ipAddresses[i] = intToIp(ipNumbers[i]);
+            ipAddresses[i] = intToIp(ipNumbers[i]) + "/" + String.valueOf(n);
         }
 
         return ipAddresses;
@@ -81,7 +83,7 @@ public class IpAddrGenerator {
     }
 
     //TODO test this
-    public static String[] drillDown(int n, String subnet, boolean src) {
+    public static String[] drillDown(int res, String subnet) {
         //We'll assume the subnet is correct
         List<String> drillDownAddresses =  new ArrayList<>();
         // Parse the subnet to get the base IP and the original mask
@@ -90,7 +92,7 @@ public class IpAddrGenerator {
         int originalMask = Integer.parseInt(subnetParts[1]);
 
         // Calculate the new mask
-        int newMask = originalMask + (int) (Math.log(n) / Math.log(2));
+        int newMask = originalMask + (int) (Math.log(res) / Math.log(2));
 
         // Calculate the base IP in integer format
         int baseIpInt = ipToInt(baseIp);
@@ -102,7 +104,7 @@ public class IpAddrGenerator {
         int newSubnetSize = 1 << (32 - newMask);
         
         // Generate all the new subnets
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < res; i++) {
             int subnetIpInt = baseIpInt + (i * newSubnetSize);
             String newSubnet = intToIp(subnetIpInt) + "/" + newMask;
             drillDownAddresses.add(newSubnet);

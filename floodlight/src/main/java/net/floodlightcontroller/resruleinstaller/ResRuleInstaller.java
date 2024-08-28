@@ -60,12 +60,18 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
-    private int res;
+    private int res = 4;
+    //For drilldown experiments
+    private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
+    private int barrierReplies = 0;
     private long sendingTime = 0;
+    private long ddStart = 0;
     private boolean flowsSent = false;
-    private int measurements = 1;
-    private boolean write = false;
+    private int measurements = 101;
+    private boolean write = true;
+    private boolean drillDownEnded = false;
     ExecutorService executor = Executors.newFixedThreadPool(1);
+    private String[] initialSubnets;
 
     @Override
     public String getName() {
@@ -107,11 +113,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     @Override
     public void init(FloodlightModuleContext context)
             throws FloodlightModuleException {
-
+        int maskBits = (int) (Math.log(res) / Math.log(2));
+        initialSubnets = IpAddrGenerator.generateIps(maskBits);
         floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
         switchService = context.getServiceImpl(IOFSwitchService.class);
         logger = LoggerFactory.getLogger(ResRuleInstaller.class);
-        res = 2;
+        
         logger.info("Rule installer initiated");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("Shutdown hook triggered. Shutting down executor...");
@@ -131,6 +138,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     @Override
     public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
         logger.info("Message received of type: {}", msg.getType());
+        /*logger.info("Flow sent: {}", flowsSent);
 
         if (flowsSent) {
             OFBarrierReply barrierReply = (OFBarrierReply) msg;
@@ -150,6 +158,23 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             catch (IOException e) {
                 logger.info("CSV Writer fn exploded lfmao");
             }
+        }*/
+
+        barrierReplies ++;
+        if ( barrierReplies >= expectedBarrierReplies) {
+            long ddTimeNano = System.nanoTime() - ddStart;
+            double ddTimeSeconds = (double) ddTimeNano/1000000000;
+            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+            String ddTimeString = decimalFormat.format(ddTimeSeconds);
+            String[] resAndInstLat = new String[]{String.valueOf(res), ddTimeString};
+            String newData = CSVWriter.convertToCSV(resAndInstLat);
+            logger.info("Drilldown done in {} seconds", ddTimeString);
+            try {
+                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/dd_latency.csv", newData, write);
+            }
+            catch (IOException e) {
+                logger.info("CSV Writer fn exploded lfmao {}", e);
+            }
         }
 
         return Command.CONTINUE; // Continue with the next listener
@@ -161,14 +186,60 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         Runnable flowInstRunnable = new Runnable() {
             @Override
             public void run() {
-                flowInstallLoop(switchId);
+                //flowInstallLoop(switchId);
+                ddStart = System.nanoTime();
+                drillDownTest(switchId);
             }
         };
         Future<?> future = executor.submit(flowInstRunnable); 
     }
 
+    private void drillDownTest(DatapathId switchId) {
+        String subnetBase = "0.0.0.0";
+        int subnetMask = 0;
+
+
+        int waitTime = 3;
+        try {
+            TimeUnit.SECONDS.sleep(waitTime); 
+        }
+        catch(InterruptedException e) { 
+            logger.error("Initial wait time failed");
+        }
+        logger.info("Drilldown started");
+        
+        
+        for (int i = 0; i < measurements; i++) {
+            ddStart = System.nanoTime();
+            while (!drillDownEnded) {
+                String subnet = subnetBase + "/" + String.valueOf(subnetMask);
+                logger.info("Drilling down into subnet {}", subnet);
+                drillDown(subnet, switchId);
+                subnetMask += (int) (Math.log(res)/Math.log(2));
+            }
+            try {
+                TimeUnit.SECONDS.sleep(2); 
+            }
+            catch(InterruptedException e) { 
+                logger.error("Post drilldown wait time failed");
+            }
+            barrierReplies = 0;
+            subnetMask = 0;
+            drillDownEnded = false;
+
+            try {
+                TimeUnit.SECONDS.sleep(2); 
+            }
+            catch(InterruptedException e) { 
+                logger.error("Post drilldown wait time failed");
+            }
+        }
+        
+    }
+
+
     //Installs and uninstalls flow rules in a loop to gather install latency information
-    public void flowInstallLoop(DatapathId switchId) {
+    private void flowInstallLoop(DatapathId switchId) {
 
         int waitTime = 3;
         try {
@@ -188,7 +259,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 logger.error("Wait time after deleting failed");
             }
 
-            installFlows(switchId);
+            IOFSwitch sw = switchService.getSwitch(switchId);
+            List<OFMessage> flowMods = createMatches(initialSubnets, initialSubnets, sw);
+            installFlows(switchId, flowMods);
 
             //Wait for flow installation
             try {
@@ -233,21 +306,18 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         
     }
 
-    private List<OFMessage> createMatches(String[] IPs, IOFSwitch sw) {
-
+    private List<OFMessage> createMatches(String[] srcIPs, String[] dstIPs, IOFSwitch sw) {
+        logger.info("Creaing matches");
         List<OFMessage> flowMods = new ArrayList<>();
         OFFactory ofFactory = sw.getOFFactory();
-        
-        //TODO check valid res
-        int maskBits = (int)(Math.log(res)/Math.log(2));
 
-        for (String IPSrc : IPs) {
-            for (String IPDst : IPs){
+        for (String IPSrc : srcIPs) {
+            for (String IPDst : dstIPs){
                 OFFlowAdd newFlow = ofFactory.buildFlowAdd()
                     .setMatch(ofFactory.buildMatch()
                             .setExact(MatchField.ETH_TYPE, EthType.IPv4)
-                            .setMasked(MatchField.IPV4_SRC, IPv4AddressWithMask.of(IPSrc + "/" + maskBits))
-                            .setMasked(MatchField.IPV4_DST, IPv4AddressWithMask.of(IPDst + "/" + maskBits))
+                            .setMasked(MatchField.IPV4_SRC, IPv4AddressWithMask.of(IPSrc))
+                            .setMasked(MatchField.IPV4_DST, IPv4AddressWithMask.of(IPDst))
                             .build())
                     .setActions(Collections.singletonList(
                             ofFactory.actions().output(OFPort.of(19), Integer.MAX_VALUE)
@@ -268,16 +338,13 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     //installs the flow rules of a given resolution
     //TODO higher resolutions lead to table full errors
-    public void installFlows(DatapathId switchId){
+    public void installFlows(DatapathId switchId, List<OFMessage> flowMods){
         
         IOFSwitch sw = switchService.getSwitch(switchId);
         
         if (sw == null) {
             throw new RuntimeException("Switch " + switchId + " not found!");
         }
-
-        String[] IPs = IpAddrGenerator.generateIps(res);
-        List<OFMessage> flowMods = createMatches(IPs, sw);
 
         int flowBatchSize = flowMods.size();
 
@@ -309,6 +376,40 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         return sublists;
     }
 
+    /*Returns true while the max depth has not been reached
+    *@subnet destination (for now) subnet where the drill down occurs
+    *
+    */
+    private void drillDown(String subnet, DatapathId switchId) {
+        //We'll assume the subnet is correct
+        IOFSwitch sw = switchService.getSwitch(switchId);
+        String[] subnetParts = subnet.split("/");
+        String baseIp = subnetParts[0];
+        int originalMask = Integer.parseInt(subnetParts[1]);
+
+        if (originalMask + (int) (Math.log(res) / Math.log(2)) > 32) {
+            logger.info("Max drilldown depth reached");
+            drillDownEnded = true;
+            return;
+        }
+        deleteAllFlows(switchId);
+
+        logger.info("Creating drilldown flow rules");
+        //For now drill down the first subnet
+        String[] drillDownSubnets = IpAddrGenerator.drillDown(res, subnet);
+        //TODO remove this
+        for (String subnetString : drillDownSubnets) {
+            System.out.println(subnetString);
+        }
+        for (String subnetString : initialSubnets) {
+            System.out.println(subnetString);
+        }
+        List<OFMessage> drillDownFlows = createMatches(initialSubnets, drillDownSubnets, sw);
+        logger.info("Drilldown rules created");
+        installFlows(switchId, drillDownFlows);
+        logger.info("Flows sent");
+        
+    }
     
     @Override
     public void switchRemoved(DatapathId switchId){
