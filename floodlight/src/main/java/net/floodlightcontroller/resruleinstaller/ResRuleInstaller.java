@@ -53,6 +53,8 @@ import org.slf4j.LoggerFactory;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
 import net.floodlightcontroller.core.PortChangeType;
 
+import org.javatuples.Triplet;
+
 import csvwriter.CSVWriter;
  
 public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, IOFSwitchListener {
@@ -61,14 +63,16 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     protected static Logger logger;
     private IOFSwitchService switchService;
     private int res = 4;
+    private long expTimeMillis = 1000;
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
+    
     private int barrierReplies = 0;
     private long sendingTime = 0;
     private long ddStart = 0;
     private boolean flowsSent = false;
     private int measurements = 101;
-    private boolean write = true;
+    private boolean write = false;
     private boolean drillDownEnded = false;
     ExecutorService executor = Executors.newFixedThreadPool(1);
     private String[] initialSubnets;
@@ -80,25 +84,25 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
  
     @Override
     public boolean isCallbackOrderingPrereq(OFType type, String name) {
-        // TODO Auto-generated method stub
+        //Auto-generated method stub
         return false;
     }
  
     @Override
     public boolean isCallbackOrderingPostreq(OFType type, String name) {
-        // TODO Auto-generated method stub
+        //Auto-generated method stub
         return false;
     }
  
     @Override
     public Collection<Class<? extends IFloodlightService>> getModuleServices() {
-        // TODO Auto-generated method stub
+        //Auto-generated method stub
         return null;
     }
  
     @Override
     public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
-        // TODO Auto-generated method stub
+        //Auto-generated method stub
         return null;
     }
  
@@ -123,7 +127,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("Shutdown hook triggered. Shutting down executor...");
             executor.shutdownNow(); // This interrupts running tasks
-            Thread.currentThread().interrupt();
             System.out.println("Shutdown complete.");
         }));
         
@@ -186,9 +189,14 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         Runnable flowInstRunnable = new Runnable() {
             @Override
             public void run() {
-                //flowInstallLoop(switchId);
+
+                // This is for flow installation experiments
+                //flowInstallLoop(switchId); 
+
+                //This is for drilldown experiments
                 ddStart = System.nanoTime();
                 drillDownTest(switchId);
+
             }
         };
         Future<?> future = executor.submit(flowInstRunnable); 
@@ -204,10 +212,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             TimeUnit.SECONDS.sleep(waitTime); 
         }
         catch(InterruptedException e) { 
-            logger.error("Initial wait time failed");
+            logger.error("Initial wait time interrupted");
         }
         logger.info("Drilldown started");
-        
         
         for (int i = 0; i < measurements; i++) {
             ddStart = System.nanoTime();
@@ -216,12 +223,26 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 logger.info("Drilling down into subnet {}", subnet);
                 drillDown(subnet, switchId);
                 subnetMask += (int) (Math.log(res)/Math.log(2));
+                
+                //Wait exp time
+                try {
+                    TimeUnit.MILLISECONDS.sleep(expTimeMillis);
+                }
+                catch(InterruptedException e) {
+                    logger.info("Exposure time interrupted");
+                }
+
+                //Get stats
+                if (!drillDownEnded) {
+                    //TODO maybe do this in another thread
+                    sendFlowStatsRequest(switchId);
+                }
             }
             try {
                 TimeUnit.SECONDS.sleep(2); 
             }
             catch(InterruptedException e) { 
-                logger.error("Post drilldown wait time failed");
+                logger.error("Post drilldown wait time interrupted");
             }
             barrierReplies = 0;
             subnetMask = 0;
@@ -231,7 +252,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 TimeUnit.SECONDS.sleep(2); 
             }
             catch(InterruptedException e) { 
-                logger.error("Post drilldown wait time failed");
+                logger.error("Post drilldown wait time interrupted");
             }
         }
         
@@ -397,17 +418,10 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         logger.info("Creating drilldown flow rules");
         //For now drill down the first subnet
         String[] drillDownSubnets = IpAddrGenerator.drillDown(res, subnet);
-        //TODO remove this
-        for (String subnetString : drillDownSubnets) {
-            System.out.println(subnetString);
-        }
-        for (String subnetString : initialSubnets) {
-            System.out.println(subnetString);
-        }
+
         List<OFMessage> drillDownFlows = createMatches(initialSubnets, drillDownSubnets, sw);
         logger.info("Drilldown rules created");
         installFlows(switchId, drillDownFlows);
-        logger.info("Flows sent");
         
     }
     
@@ -439,5 +453,99 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         
     }
 
- 
+    private void sendFlowStatsRequest(DatapathId switchId) {
+        IOFSwitch sw = switchService.getSwitch(switchId);
+        ListenableFuture<?> future;
+        List<OFStatsReply> values = null;
+        ArrayList<Integer> packets = new ArrayList<Integer>();
+
+        Match match = sw.getOFFactory().buildMatch()
+        .setExact(MatchField.ETH_TYPE, EthType.IPv4)
+        .build();
+
+        OFFlowStatsRequest request = sw.getOFFactory().buildFlowStatsRequest()
+        .setMatch(match)
+        .setTableId(TableId.ALL) // Query all tables
+        .setOutPort(OFPort.ANY) // Match any output port
+        .setOutGroup(OFGroup.ANY) // Match any group
+        .build();
+
+        future = sw.writeStatsRequest(request);
+        
+        try {
+            values = (List<OFStatsReply>) future.get(5, TimeUnit.SECONDS);
+            logger.info("Stats received");
+
+            //TODO change this to an static list because higher resolutions have multiple replies
+            List<Triplet> totalMatchesAndCounts = new ArrayList<Triplet>();
+
+            // Iterate over the received stats replies
+            for (OFStatsReply reply : values) {
+                if (reply instanceof OFFlowStatsReply) {
+                    OFFlowStatsReply flowStatsReply = (OFFlowStatsReply) reply;
+                
+                    // Iterate over each flow stats entry in the reply
+                    for (OFFlowStatsEntry entry : flowStatsReply.getEntries()) {
+                        Match currentMatch = entry.getMatch();
+                        Iterable<MatchField<?>> matchFields = currentMatch.getMatchFields();
+                        /*for (MatchField<?> field : matchFields) {
+                            logger.info(field.getName());
+                        }*/
+
+                        //TODO handle cases where there's no mask
+                        Masked<IPv4Address> srcIp = null;
+                        Masked<IPv4Address> dstIp = null;
+                        try {
+                            srcIp = currentMatch.getMasked(MatchField.IPV4_SRC);
+                        }
+                        catch (UnsupportedOperationException e)
+                        {
+                            IPv4Address address = currentMatch.get(MatchField.IPV4_SRC);
+                            IPv4Address mask = IPv4Address.NO_MASK;
+                            srcIp = Masked.of(address, mask);
+                        }
+
+                        try {
+                            dstIp = currentMatch.getMasked(MatchField.IPV4_DST);
+                        }
+                        catch (UnsupportedOperationException e)
+                        {
+                            IPv4Address address = currentMatch.get(MatchField.IPV4_DST);
+                            IPv4Address mask = IPv4Address.NO_MASK;
+                            dstIp = Masked.of(address, mask);
+                        }
+                        
+                                               
+                        U64 packetCount = entry.getPacketCount();
+
+                        Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount = 
+                            Triplet.with(srcIp, dstIp, packetCount);
+                        totalMatchesAndCounts.add(matchAndCount);
+                    }
+                }
+            }
+
+            //TODO remove this, this is to check the matches and counts list's correct functionality
+            for(Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount : totalMatchesAndCounts) {
+
+                Masked<IPv4Address> srcIp = matchAndCount.getValue0();
+                Masked<IPv4Address> dstIp = matchAndCount.getValue1();
+
+                IPv4Address srcIpAddr = srcIp.getValue();
+                IPv4Address dstIpAddr = dstIp.getValue();
+
+                int srcIpMask = srcIp.getMask().asCidrMaskLength();
+                int dstIpMask = dstIp.getMask().asCidrMaskLength();
+
+                logger.info("SrcIP: {}/{}, DstIP: {}/{}, PktCount: {}", 
+                    srcIpAddr, srcIpMask,
+                    dstIpAddr, dstIpMask,
+                    matchAndCount.getValue2());
+            }
+        }
+        catch (Exception e){
+            logger.error("Failure retrieving statistics from switch {}. {}", sw, e);
+        }
+    }
+    
 }
