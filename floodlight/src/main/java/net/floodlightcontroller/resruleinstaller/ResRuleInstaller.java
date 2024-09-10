@@ -477,7 +477,8 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             logger.info("Stats received");
 
             //TODO change this to an static list because higher resolutions have multiple replies
-            List<Triplet> totalMatchesAndCounts = new ArrayList<Triplet>();
+            List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
+                new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
 
             // Iterate over the received stats replies
             for (OFStatsReply reply : values) {
@@ -515,7 +516,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                             dstIp = Masked.of(address, mask);
                         }
                         
-                                               
+                                         
                         U64 packetCount = entry.getPacketCount();
 
                         Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount = 
@@ -524,6 +525,10 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     }
                 }
             }
+
+            //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
+
+            Collections.sort(totalMatchesAndCounts, new TripletComparator());
 
             //TODO remove this, this is to check the matches and counts list's correct functionality
             for(Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount : totalMatchesAndCounts) {
@@ -542,10 +547,62 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     dstIpAddr, dstIpMask,
                     matchAndCount.getValue2());
             }
+
+            long[][] aggregationMap = createAggregationMap(totalMatchesAndCounts);
+            printAggMap(aggregationMap);
+
         }
         catch (Exception e){
             logger.error("Failure retrieving statistics from switch {}. {}", sw, e);
         }
     }
-    
+
+    private long[][] createAggregationMap(List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> matchesAndCounts) {
+        
+        long[][] aggregationMap = new long[res][res];
+
+        for (int i = 0; i < res; i++){
+            for (int j = 0; j < res; j++) {
+                aggregationMap[i][j] = matchesAndCounts.get(i * res + j).getValue2().getValue();
+            }
+        }
+
+        return aggregationMap;
+
+    }
+
+    private void printAggMap(long[][] aggMap) {
+        // Loop through each row
+        for (long[] row : aggMap) {
+            // Loop through each column in the row
+            for (long element : row) {
+                // Print each element followed by a space
+                System.out.print(element + " ");
+            }
+            // Move to the next line after printing the row
+            System.out.println();
+        }
+    }
+
+    static class TripletComparator implements Comparator<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> {
+        @Override
+        public int compare(Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64> t1,
+                           Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64> t2) {
+
+            IPv4Address ip1_1 = t1.getValue0().getValue();
+            IPv4Address ip1_2 = t2.getValue0().getValue();
+
+            // Compare first IPv4 address
+            int cmp = ip1_1.compareTo(ip1_2);
+            if (cmp != 0) {
+                return cmp;
+            }
+
+            IPv4Address ip2_1 = t1.getValue1().getValue();
+            IPv4Address ip2_2 = t2.getValue1().getValue();
+
+            // Compare second IPv4 address
+            return ip2_1.compareTo(ip2_2);
+        }
+    }
 }

@@ -407,6 +407,7 @@ net/floodlightcontroller/virtualnetwork/NetworkResource.class
 org/sdnplatform/sync/thrift/VersionedValue$VersionedValueTupleScheme.class
 net/floodlightcontroller/hasupport/IFilterQueue.class
 org/sdnplatform/sync/thrift/ClockEntry$ClockEntryStandardScheme.class
+net/floodlightcontroller/resruleinstaller/ResRuleInstaller$TripletComparator.class
 net/floodlightcontroller/util/LoadMonitor.class
 net/floodlightcontroller/core/FloodlightContextStore.class
 net/floodlightcontroller/devicemanager/internal/DeviceIndex.class
