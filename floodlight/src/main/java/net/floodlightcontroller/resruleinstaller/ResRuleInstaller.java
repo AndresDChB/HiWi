@@ -62,13 +62,16 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
-    private int res = 4;
+    private int res = 32;
     private long expTimeMillis = 1000;
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
     
     ZMQ.Context socketContext = ZMQ.context(1);
     ZMQ.Socket socket = socketContext.socket(ZMQ.REQ);
+
+    List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
+    new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
 
     private int barrierReplies = 0;
     private long sendingTime = 0;
@@ -246,10 +249,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     //TODO maybe do this in another thread
                     ListenableFuture<?> future = sendFlowStatsRequest(switchId);
                     IOFSwitch sw = switchService.getSwitch(switchId);
-                    List<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> totalMatchesAndCounts = getStats(sw, future);
+                    getStats(sw, future);
                     long[][] aggregationMap = createAggregationMap(totalMatchesAndCounts);
-                    printAggMap(aggregationMap);
+                    //printAggMap(aggregationMap);
                             
+                    System.out.println("Number of matches and counts: " + totalMatchesAndCounts.size());
+
                     JSONArray aggMapJSON = new JSONArray();
                     for (long[] row : aggregationMap) {
                         JSONArray rowArray = new JSONArray();
@@ -539,14 +544,15 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         
 
 
-    private List<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> getStats(IOFSwitch sw, ListenableFuture<?> future){
+    private void getStats(IOFSwitch sw, ListenableFuture<?> future){
         List<OFStatsReply> values = null;
-        //TODO change this to an static list because higher resolutions have multiple replies
-        List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
-        new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
+        
         try {
             values = (List<OFStatsReply>) future.get(5, TimeUnit.SECONDS);
+            totalMatchesAndCounts.clear();
             logger.info("Stats received");
+            int expectedReplies = (int) Math.pow(res, 2);
+            
         }
         catch (Exception e){
             logger.error("Failure retrieving statistics from switch {}. {}", sw, e);
@@ -602,8 +608,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
 
         Collections.sort(totalMatchesAndCounts, new TripletComparator());
-
-        return totalMatchesAndCounts;
     }
 
     private long[][] createAggregationMap(List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> matchesAndCounts) {

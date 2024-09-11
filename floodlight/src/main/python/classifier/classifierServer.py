@@ -58,7 +58,7 @@ def manage_inputs():
             prompt_shown = False
 
 def communicate_with_java():
-    classifier = cl.Classifier(4,1,False)
+    classifier = cl.Classifier(32,1,False)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind("tcp://localhost:5555")
@@ -74,10 +74,8 @@ def communicate_with_java():
             print(f"Received Aggregation Map")
             agg_map_list = json.loads(message)
             np_agg_map = np.array(agg_map_list)
-            #print(np_agg_map)
+            print(np_agg_map)
             classifier.classify(np_agg_map,0)
-
-
 
             socket.send_string("Hello, Client!")
     socket.close()

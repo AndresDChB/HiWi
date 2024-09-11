@@ -7,7 +7,7 @@ Make sure to have Java JDK 8 as the active Java JDK.
 -----------------------------------------------------------------------
 Usage for monitoring:
 
-To use the controller for monitoring first start the python classifierServer.py app. The app can be found in the directory /floodlight/src/main/python/classifier
+To use the controller for monitoring first start the python classifierServer.py app. The app can be found in the directory /floodlight/src/main/python/classifier. Remember to set the classifier's CNN resolution to the one of the experiments. 
 
 After starting the python app go to the /floodlight directory and execute: sudo java -jar target/floodlight.jar
 
