@@ -5,6 +5,8 @@ import select
 import signal
 import sys
 import numpy as np
+import json
+import classifier as cl
 
 # Event to signal threads to stop
 stop_event = threading.Event()
@@ -56,6 +58,7 @@ def manage_inputs():
             prompt_shown = False
 
 def communicate_with_java():
+    classifier = cl.Classifier(4,1,False)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind("tcp://localhost:5555")
@@ -68,7 +71,14 @@ def communicate_with_java():
 
         if socket in socks and socks[socket] == zmq.POLLIN:
             message = socket.recv_string()
-            print(f"Server: Received request -> {message}")
+            print(f"Received Aggregation Map")
+            agg_map_list = json.loads(message)
+            np_agg_map = np.array(agg_map_list)
+            #print(np_agg_map)
+            classifier.classify(np_agg_map,0)
+
+
+
             socket.send_string("Hello, Client!")
     socket.close()
     context.term()

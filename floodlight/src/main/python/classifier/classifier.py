@@ -19,9 +19,9 @@ class Classifier():
 
     def classify(self, np_aggregation, stats_req_time):
 
-        start_time = time.time()
+        #start_time = time.time()
 
-        request_classifier_lat = start_time - stats_req_time
+        #request_classifier_lat = start_time - stats_req_time
         #csv_writer.write('req_class_start.csv', [[self.res, request_classifier_lat]], self.write)
 
         if np_aggregation is None:
@@ -44,16 +44,16 @@ class Classifier():
             print("Queue is not full, waiting for more images")
             return
 
-        start_c_time = time.time()  
+        #start_c_time = time.time()  
 
         prediction = self.cnn.predict(cnn_input)
 
-        class_duration = time.time() - start_c_time
-        print(f"Classfication returned after {class_duration} seconds")
+        #class_duration = time.time() - start_c_time
+        #print(f"Classfication returned after {class_duration} seconds")
         #csv_writer.write('classification.csv', [[self.res, class_duration]], self.write)
 
-        req_to_class_duration = time.time() - stats_req_time
-        print(f"Total time from request to classification: {req_to_class_duration} seconds")
+        #req_to_class_duration = time.time() - stats_req_time
+        #print(f"Total time from request to classification: {req_to_class_duration} seconds")
         #csv_writer.write('class_from_req.csv', [[self.res, req_to_class_duration]], self.write)
         print(prediction)
 

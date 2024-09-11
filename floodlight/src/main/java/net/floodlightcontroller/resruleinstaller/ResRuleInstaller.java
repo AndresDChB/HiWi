@@ -43,6 +43,10 @@ import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.packet.Ethernet;
 
 import org.zeromq.ZMQ;
+import org.zeromq.ZMQ.Poller;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -245,18 +249,33 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     List<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> totalMatchesAndCounts = getStats(sw, future);
                     long[][] aggregationMap = createAggregationMap(totalMatchesAndCounts);
                     printAggMap(aggregationMap);
-                    //TODO remove testLong
-                    long testLong = 1;
-                    
-                    
-                    //TODO add the aggmap here
-                    String mockReq = "Lmao lmao lmao";
-                    socket.send(mockReq.getBytes(ZMQ.CHARSET), 0);
+                            
+                    JSONArray aggMapJSON = new JSONArray();
+                    for (long[] row : aggregationMap) {
+                        JSONArray rowArray = new JSONArray();
+                        for (long value : row) {
+                            rowArray.put(value);
+                        }
+                        aggMapJSON.put(rowArray);
+                    }
+
+                    String aggMapJSONString = aggMapJSON.toString();
+                    socket.send(aggMapJSONString.getBytes(ZMQ.CHARSET), 0);
 
                     // Wait for the reply from the server
-                    byte[] reply = socket.recv(0);
-                    System.out.println("Client: Received reply -> " + new String(reply, ZMQ.CHARSET));
+                    Poller poller = socketContext.poller(1); // Poller for 1 socket
+                    poller.register(socket, Poller.POLLIN);
+                    // Poll for events
+                    poller.poll(5000); // Timeout in milliseconds
 
+                    if (poller.pollin(0)) {
+                        // Receive message if available
+                
+                        String message = socket.recvStr(0);
+                        if (message != null) {
+                            System.out.println("Received: " + message);
+                        }
+                    }
                 }
             }
             try {
