@@ -832,6 +832,7 @@ net/floodlightcontroller/flowcache/IFlowReconcileEngineService.class
 org/sdnplatform/sync/internal/remote/RemoteSyncFuture.class
 net/floodlightcontroller/flowcache/FlowReconcileManager.class
 net/floodlightcontroller/staticentry/web/StaticEntryUsageResource$1.class
+net/floodlightcontroller/resruleinstaller/ClassifierExecutor.class
 org/sdnplatform/sync/error/UnknownStoreException.class
 net/floodlightcontroller/packetstreamer/thrift/Message$1.class
 net/floodlightcontroller/core/internal/CmdLineSettings.class

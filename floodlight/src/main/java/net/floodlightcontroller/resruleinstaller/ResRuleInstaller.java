@@ -1,11 +1,5 @@
 package net.floodlightcontroller.resruleinstaller;
  
-import java.util.Collections;
-import java.util.Collection;
-import java.util.Map;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Set;
 import java.util.*;
 import java.util.concurrent.*;
 import java.text.DecimalFormat;
@@ -48,6 +42,8 @@ import org.projectfloodlight.openflow.types.*;
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.packet.Ethernet;
 
+import org.zeromq.ZMQ;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
@@ -67,6 +63,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
     
+    ZMQ.Context socketContext = ZMQ.context(1);
+    ZMQ.Socket socket = socketContext.socket(ZMQ.REQ);
+
     private int barrierReplies = 0;
     private long sendingTime = 0;
     private long ddStart = 0;
@@ -74,6 +73,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private int measurements = 101;
     private boolean write = false;
     private boolean drillDownEnded = false;
+    private ClassifierExecutor classifierExecutor = new ClassifierExecutor();
     ExecutorService executor = Executors.newFixedThreadPool(1);
     private String[] initialSubnets;
 
@@ -117,6 +117,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     @Override
     public void init(FloodlightModuleContext context)
             throws FloodlightModuleException {
+        
+        socket.connect("tcp://localhost:5555");
+
         int maskBits = (int) (Math.log(res) / Math.log(2));
         initialSubnets = IpAddrGenerator.generateIps(maskBits);
         floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
@@ -126,6 +129,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         logger.info("Rule installer initiated");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("Shutdown hook triggered. Shutting down executor...");
+            // Clean up
+            socket.close();
+            socketContext.term();
             executor.shutdownNow(); // This interrupts running tasks
             System.out.println("Shutdown complete.");
         }));
@@ -206,7 +212,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         String subnetBase = "0.0.0.0";
         int subnetMask = 0;
 
-
         int waitTime = 3;
         try {
             TimeUnit.SECONDS.sleep(waitTime); 
@@ -235,7 +240,23 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 //Get stats
                 if (!drillDownEnded) {
                     //TODO maybe do this in another thread
-                    sendFlowStatsRequest(switchId);
+                    ListenableFuture<?> future = sendFlowStatsRequest(switchId);
+                    IOFSwitch sw = switchService.getSwitch(switchId);
+                    List<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> totalMatchesAndCounts = getStats(sw, future);
+                    long[][] aggregationMap = createAggregationMap(totalMatchesAndCounts);
+                    printAggMap(aggregationMap);
+                    //TODO remove testLong
+                    long testLong = 1;
+                    
+                    
+                    //TODO add the aggmap here
+                    String mockReq = "Lmao lmao lmao";
+                    socket.send(mockReq.getBytes(ZMQ.CHARSET), 0);
+
+                    // Wait for the reply from the server
+                    byte[] reply = socket.recv(0);
+                    System.out.println("Client: Received reply -> " + new String(reply, ZMQ.CHARSET));
+
                 }
             }
             try {
@@ -452,12 +473,11 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     public void switchDeactivated(DatapathId switchId){
         
     }
-
-    private void sendFlowStatsRequest(DatapathId switchId) {
+    
+    //Separate this into different functions
+    private ListenableFuture<?> sendFlowStatsRequest(DatapathId switchId) {
         IOFSwitch sw = switchService.getSwitch(switchId);
         ListenableFuture<?> future;
-        List<OFStatsReply> values = null;
-        ArrayList<Integer> packets = new ArrayList<Integer>();
 
         Match match = sw.getOFFactory().buildMatch()
         .setExact(MatchField.ETH_TYPE, EthType.IPv4)
@@ -471,90 +491,100 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         .build();
 
         future = sw.writeStatsRequest(request);
+
+        return future;
         
+        /*
+
+        //TODO remove this, this is to check the matches and counts list's correct functionality
+        for(Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount : totalMatchesAndCounts) {
+
+            Masked<IPv4Address> srcIp = matchAndCount.getValue0();
+            Masked<IPv4Address> dstIp = matchAndCount.getValue1();
+
+            IPv4Address srcIpAddr = srcIp.getValue();
+            IPv4Address dstIpAddr = dstIp.getValue();
+
+            int srcIpMask = srcIp.getMask().asCidrMaskLength();
+            int dstIpMask = dstIp.getMask().asCidrMaskLength();
+
+            logger.info("SrcIP: {}/{}, DstIP: {}/{}, PktCount: {}", 
+                srcIpAddr, srcIpMask,
+                dstIpAddr, dstIpMask,
+                matchAndCount.getValue2());
+        }
+
+        */
+
+    }
+        
+
+
+    private List<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> getStats(IOFSwitch sw, ListenableFuture<?> future){
+        List<OFStatsReply> values = null;
+        //TODO change this to an static list because higher resolutions have multiple replies
+        List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
+        new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
         try {
             values = (List<OFStatsReply>) future.get(5, TimeUnit.SECONDS);
             logger.info("Stats received");
-
-            //TODO change this to an static list because higher resolutions have multiple replies
-            List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
-                new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
-
-            // Iterate over the received stats replies
-            for (OFStatsReply reply : values) {
-                if (reply instanceof OFFlowStatsReply) {
-                    OFFlowStatsReply flowStatsReply = (OFFlowStatsReply) reply;
-                
-                    // Iterate over each flow stats entry in the reply
-                    for (OFFlowStatsEntry entry : flowStatsReply.getEntries()) {
-                        Match currentMatch = entry.getMatch();
-                        Iterable<MatchField<?>> matchFields = currentMatch.getMatchFields();
-                        /*for (MatchField<?> field : matchFields) {
-                            logger.info(field.getName());
-                        }*/
-
-                        //TODO handle cases where there's no mask
-                        Masked<IPv4Address> srcIp = null;
-                        Masked<IPv4Address> dstIp = null;
-                        try {
-                            srcIp = currentMatch.getMasked(MatchField.IPV4_SRC);
-                        }
-                        catch (UnsupportedOperationException e)
-                        {
-                            IPv4Address address = currentMatch.get(MatchField.IPV4_SRC);
-                            IPv4Address mask = IPv4Address.NO_MASK;
-                            srcIp = Masked.of(address, mask);
-                        }
-
-                        try {
-                            dstIp = currentMatch.getMasked(MatchField.IPV4_DST);
-                        }
-                        catch (UnsupportedOperationException e)
-                        {
-                            IPv4Address address = currentMatch.get(MatchField.IPV4_DST);
-                            IPv4Address mask = IPv4Address.NO_MASK;
-                            dstIp = Masked.of(address, mask);
-                        }
-                        
-                                         
-                        U64 packetCount = entry.getPacketCount();
-
-                        Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount = 
-                            Triplet.with(srcIp, dstIp, packetCount);
-                        totalMatchesAndCounts.add(matchAndCount);
-                    }
-                }
-            }
-
-            //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
-
-            Collections.sort(totalMatchesAndCounts, new TripletComparator());
-
-            //TODO remove this, this is to check the matches and counts list's correct functionality
-            for(Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount : totalMatchesAndCounts) {
-
-                Masked<IPv4Address> srcIp = matchAndCount.getValue0();
-                Masked<IPv4Address> dstIp = matchAndCount.getValue1();
-
-                IPv4Address srcIpAddr = srcIp.getValue();
-                IPv4Address dstIpAddr = dstIp.getValue();
-
-                int srcIpMask = srcIp.getMask().asCidrMaskLength();
-                int dstIpMask = dstIp.getMask().asCidrMaskLength();
-
-                logger.info("SrcIP: {}/{}, DstIP: {}/{}, PktCount: {}", 
-                    srcIpAddr, srcIpMask,
-                    dstIpAddr, dstIpMask,
-                    matchAndCount.getValue2());
-            }
-
-            long[][] aggregationMap = createAggregationMap(totalMatchesAndCounts);
-            printAggMap(aggregationMap);
-
         }
         catch (Exception e){
             logger.error("Failure retrieving statistics from switch {}. {}", sw, e);
         }
+            
+
+        // Iterate over the received stats replies
+        for (OFStatsReply reply : values) {
+            if (reply instanceof OFFlowStatsReply) {
+                OFFlowStatsReply flowStatsReply = (OFFlowStatsReply) reply;
+            
+                // Iterate over each flow stats entry in the reply
+                for (OFFlowStatsEntry entry : flowStatsReply.getEntries()) {
+                    Match currentMatch = entry.getMatch();
+                    Iterable<MatchField<?>> matchFields = currentMatch.getMatchFields();
+                    /*for (MatchField<?> field : matchFields) {
+                        logger.info(field.getName());
+                    }*/
+            
+                    Masked<IPv4Address> srcIp = null;
+                    Masked<IPv4Address> dstIp = null;
+                    try {
+                        srcIp = currentMatch.getMasked(MatchField.IPV4_SRC);
+                    }
+                    catch (UnsupportedOperationException e)
+                    {
+                        IPv4Address address = currentMatch.get(MatchField.IPV4_SRC);
+                        IPv4Address mask = IPv4Address.NO_MASK;
+                        srcIp = Masked.of(address, mask);
+                    }
+
+                    try {
+                        dstIp = currentMatch.getMasked(MatchField.IPV4_DST);
+                    }
+                    catch (UnsupportedOperationException e)
+                    {
+                        IPv4Address address = currentMatch.get(MatchField.IPV4_DST);
+                        IPv4Address mask = IPv4Address.NO_MASK;
+                        dstIp = Masked.of(address, mask);
+                    }
+                    
+                                        
+                    U64 packetCount = entry.getPacketCount();
+
+                    Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64> matchAndCount = 
+                        Triplet.with(srcIp, dstIp, packetCount);
+                    totalMatchesAndCounts.add(matchAndCount);
+                }
+            }
+        }   
+        
+
+        //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
+
+        Collections.sort(totalMatchesAndCounts, new TripletComparator());
+
+        return totalMatchesAndCounts;
     }
 
     private long[][] createAggregationMap(List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> matchesAndCounts) {
