@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.text.DecimalFormat;
 import java.io.IOException;
+import java.net.Socket;
  
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IOFMessageListener;
@@ -62,7 +63,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
-    private int res = 32;
+    private int res = 4;
     private long expTimeMillis = 1000;
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
@@ -74,6 +75,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
 
     private int barrierReplies = 0;
+    private boolean classifierConnected = false;
     private long sendingTime = 0;
     private long ddStart = 0;
     private boolean flowsSent = false;
@@ -120,11 +122,18 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         l.add(IOFSwitchService.class);
         return l;
     }
- 
+    
     @Override
     public void init(FloodlightModuleContext context)
             throws FloodlightModuleException {
         
+                
+        boolean serverAvailable = isServerAvailable("localhost", 5555);
+        if (serverAvailable) {
+            System.out.println("Connected to classifier");
+            classifierConnected = true;
+        }
+
         socket.connect("tcp://localhost:5555");
 
         int maskBits = (int) (Math.log(res) / Math.log(2));
@@ -210,9 +219,43 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 ddStart = System.nanoTime();
                 drillDownTest(switchId);
 
+                //Installation and deletion experiments
+                //installationAndDeletionTest(switchId);
             }
         };
         Future<?> future = executor.submit(flowInstRunnable); 
+    }
+
+    private void installationAndDeletionTest(DatapathId switchId) {
+        IOFSwitch sw = switchService.getSwitch(switchId);
+
+                //Verify initial deletion
+                deleteAllFlows(switchId);
+                
+                try{
+                    TimeUnit.SECONDS.sleep(7);
+                } catch (InterruptedException e) {
+                    logger.info("Sleep interrupted");
+                }
+
+                ListenableFuture<?> future = sendFlowStatsRequest(switchId);
+                getStats(sw, future);
+                System.out.println("Expected Rules: 0");
+                System.out.println("Number of installed flow rules: " + totalMatchesAndCounts.size());
+
+                List<OFMessage> flowMods = createMatches(initialSubnets, initialSubnets, sw);
+                installFlows(switchId, flowMods);
+                //Verify installation
+                future = sendFlowStatsRequest(switchId);
+                getStats(sw, future);
+                System.out.println("Expected Rules: " + Math.pow(res, 2));
+                System.out.println("Number of installed flow rules: " + totalMatchesAndCounts.size());
+                //Verify deletion
+                deleteAllFlows(switchId);
+                future = sendFlowStatsRequest(switchId);
+                getStats(sw, future);
+                System.out.println("Expected Rules: 0");
+                System.out.println("Number of installed flow rules: " + totalMatchesAndCounts.size());
     }
 
     private void drillDownTest(DatapathId switchId) {
@@ -264,12 +307,19 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                         aggMapJSON.put(rowArray);
                     }
 
-                    String aggMapJSONString = aggMapJSON.toString();
-                    socket.send(aggMapJSONString.getBytes(ZMQ.CHARSET), 0);
+                    if (classifierConnected) {
+                        String aggMapJSONString = aggMapJSON.toString();
+                        System.out.println("Sending agg map to classifier");
+                        socket.send(aggMapJSONString.getBytes(ZMQ.CHARSET), 0);
+                        System.out.println("Sending done");
+                    }
 
+                    
                     // Wait for the reply from the server
                     Poller poller = socketContext.poller(1); // Poller for 1 socket
                     poller.register(socket, Poller.POLLIN);
+
+                    System.out.println("Waiting for response");
                     // Poll for events
                     poller.poll(5000); // Timeout in milliseconds
 
@@ -420,7 +470,10 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
         sendingTime = System.nanoTime();
 
+
+        System.out.println("Number of batches: " + batches.size());
         for (List<OFMessage> batch : batches) {
+            System.out.println("Batch size: " + batch.size());
             sw.write(batch);
         }
         logger.info("Flow rules sent to {}, sending time: {}", switchId, sendingTime);
@@ -433,7 +486,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private <T> List<List<T>> splitList(List<T> originalList) {
         List<List<T>> sublists = new ArrayList<>();
         int size = originalList.size();
-        int chunkSize = (res == 64) ? 1 : 512;
+        int chunkSize = (res == 64) ? 4096 : 1024;
         
         for (int i = 0; i < size; i += chunkSize) {
             sublists.add(new ArrayList<>(originalList.subList(i, Math.min(size, i + chunkSize))));
@@ -551,7 +604,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             values = (List<OFStatsReply>) future.get(5, TimeUnit.SECONDS);
             totalMatchesAndCounts.clear();
             logger.info("Stats received");
-            int expectedReplies = (int) Math.pow(res, 2);
+            //In case this getStats() get called multiple times before having all rules
+            //clear only after all matches have been received
+            //int expectedReplies = (int) Math.pow(res, 2);
             
         }
         catch (Exception e){
@@ -608,6 +663,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
 
         Collections.sort(totalMatchesAndCounts, new TripletComparator());
+        System.out.println("Received " + totalMatchesAndCounts.size() + "stats");
     }
 
     private long[][] createAggregationMap(List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> matchesAndCounts) {
@@ -656,6 +712,14 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
             // Compare second IPv4 address
             return ip2_1.compareTo(ip2_2);
+        }
+    }
+
+    private static boolean isServerAvailable(String host, int port) {
+        try (Socket socket = new Socket(host, port)) {
+            return true;  // Connection successful
+        } catch (Exception e) {
+            return false;  // Server is not available
         }
     }
 }

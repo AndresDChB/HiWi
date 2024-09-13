@@ -1,0 +1,17 @@
+When installing flow rules of resolution of 64, a "table full" error happens. 
+When making a stats request right after the installation attempt it can be seen that only 2700-3000 flow rules have been installed.
+This happens when installing the rules on an empty flow table. To ensure the flow table is empty, a deletion command is sent.
+Afterwards, the program waits 7 seconds before sending a stats request to ensure that the number of flow rules is 0. 
+After that the new rules are sent.
+This implies that for a resolution of 64, there is a problem with the installation procedure as this experiment ensures that 
+the installation is performed with a clear flow table.
+This happens if the rules are sent one by one and in batches of different sizes up to sending the 4096 rules in one batch.
+When the rules are batched, sending each batch right after the other is the best option. 
+For some reason, sending one 512 rule batch, waiting 1 or 2 second(s) and sending more 512 rule batches afterwards
+each after a waiting time as well, leads to even earlier "table full" errors right after the first batch.
+
+This experiment was also performed with the resolution of 32. Installation was always successful.
+
+During a drilldown resolution of 64 is completely unusable for this reason. Resolution of 32, even though it did not have any
+issues with previously mentioned experiment showed incosisten behaviour during drilldowns. Sometimes a whole drilldown was 
+possible without any trouble, some other times early drill down iterations already resulted in "table full" errors.

@@ -70,12 +70,18 @@ def communicate_with_java():
         socks = dict(poller.poll(1000))
 
         if socket in socks and socks[socket] == zmq.POLLIN:
-            message = socket.recv_string()
-            print(f"Received Aggregation Map")
-            agg_map_list = json.loads(message)
-            np_agg_map = np.array(agg_map_list)
-            print(np_agg_map)
-            classifier.classify(np_agg_map,0)
+            try :
+                message = socket.recv_string()
+                print(f"Received Aggregation Map")
+                agg_map_list = json.loads(message)
+                np_agg_map = np.array(agg_map_list)
+                print(np_agg_map)
+                classifier.classify(np_agg_map,0)
+            
+            except Exception as e:
+                print(f"Something went wrong \n {e}")
+
+            
 
             socket.send_string("Hello, Client!")
     socket.close()
