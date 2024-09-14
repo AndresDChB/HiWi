@@ -5,6 +5,7 @@ import java.util.concurrent.*;
 import java.text.DecimalFormat;
 import java.io.IOException;
 import java.net.Socket;
+import java.time.Instant;
  
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IOFMessageListener;
@@ -47,6 +48,7 @@ import org.zeromq.ZMQ;
 import org.zeromq.ZMQ.Poller;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import org.slf4j.Logger;
@@ -63,7 +65,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
-    private int res = 4;
+    private int res = 16;
     private long expTimeMillis = 1000;
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
@@ -186,21 +188,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }*/
 
         barrierReplies ++;
-        if ( barrierReplies >= expectedBarrierReplies) {
-            long ddTimeNano = System.nanoTime() - ddStart;
-            double ddTimeSeconds = (double) ddTimeNano/1000000000;
-            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
-            String ddTimeString = decimalFormat.format(ddTimeSeconds);
-            String[] resAndInstLat = new String[]{String.valueOf(res), ddTimeString};
-            String newData = CSVWriter.convertToCSV(resAndInstLat);
-            logger.info("Drilldown done in {} seconds", ddTimeString);
-            try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/dd_latency.csv", newData, write);
-            }
-            catch (IOException e) {
-                logger.info("CSV Writer fn exploded lfmao {}", e);
-            }
-        }
 
         return Command.CONTINUE; // Continue with the next listener
     }
@@ -272,8 +259,10 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         logger.info("Drilldown started");
         
         for (int i = 0; i < measurements; i++) {
+            int ddStep = 1;
             ddStart = System.nanoTime();
             while (!drillDownEnded) {
+                long ddIterStart = System.nanoTime();
                 String subnet = subnetBase + "/" + String.valueOf(subnetMask);
                 logger.info("Drilling down into subnet {}", subnet);
                 drillDown(subnet, switchId);
@@ -289,6 +278,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
                 //Get stats
                 if (!drillDownEnded) {
+                    
                     //TODO maybe do this in another thread
                     ListenableFuture<?> future = sendFlowStatsRequest(switchId);
                     IOFSwitch sw = switchService.getSwitch(switchId);
@@ -308,9 +298,26 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     }
 
                     if (classifierConnected) {
-                        String aggMapJSONString = aggMapJSON.toString();
+
+                        JSONObject jsonMessage = new JSONObject();
+
+                        // Get the current instant (timestamp)
+                        Instant now = Instant.now();
+
+                        // Convert to epoch nanoseconds
+                        long unixTimeNano = now.toEpochMilli() * 1_000_000L + now.getNano();
+
+                        try {
+                            jsonMessage.put("timestamp", unixTimeNano);
+                            jsonMessage.put("aggMap", aggMapJSON);
+                        } catch (JSONException e) {
+                            System.out.println("Creation of JSON object failed: " + e);
+                        }
+                        
+
+                        String jsonString = jsonMessage.toString();
                         System.out.println("Sending agg map to classifier");
-                        socket.send(aggMapJSONString.getBytes(ZMQ.CHARSET), 0);
+                        socket.send(jsonString.getBytes(ZMQ.CHARSET), 0);
                         System.out.println("Sending done");
                     }
 
@@ -329,10 +336,47 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                         String message = socket.recvStr(0);
                         if (message != null) {
                             System.out.println("Received: " + message);
+                            long ddIterEnd = System.nanoTime();
+                            System.out.println("Iteration start time: " + ddIterStart);
+                            System.out.println("Iteration end time: " + ddIterEnd);
+                            double ddIterTime = (double) (ddIterEnd - ddIterStart) / 1000000000; 
+                            ddIterTime -= (double) expTimeMillis / 1000; //Remove exposure time
+                            System.out.println("Drilldown iteration " + ddStep + " took " + ddIterTime + " seconds.");
+                            
+                            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+                            String ddIterString = decimalFormat.format(ddIterTime);
+                            String[] resAndLat = new String[]{String.valueOf(res), ddIterString};
+                            String newData = CSVWriter.convertToCSV(resAndLat);
+                            try {
+                                CSVWriter.writeToCsv("~/floodlight/results/dd_iteration_latency.csv", newData, write);
+                            } catch (IOException e) {
+                                logger.info("CSV Writer fn exploded lfmao");
+                            }
+
                         }
                     }
                 }
+                
+                ddStep++;
             }
+            ddStep --; //Remove last increment as the last iteration only detects whether the drilldown has ended
+            
+            long ddTimeNano = System.nanoTime() - ddStart;
+            double ddTimeSeconds = (double) ddTimeNano/1000000000;
+            System.out.println("Drilldown time with exposure time: " + ddTimeSeconds);
+            ddTimeSeconds -= ddStep; //Remove exposure time seconds
+            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+            String ddTimeString = decimalFormat.format(ddTimeSeconds);
+            String[] resAndInstLat = new String[]{String.valueOf(res), ddTimeString};
+            String newData = CSVWriter.convertToCSV(resAndInstLat);
+            logger.info("Drilldown done in {} seconds", ddTimeString);
+            try {
+                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/dd_latency_with_classification.csv", newData, write);
+            }
+            catch (IOException e) {
+                logger.info("CSV Writer fn exploded lfmao {}", e);
+            }
+            
             try {
                 TimeUnit.SECONDS.sleep(2); 
             }
@@ -663,7 +707,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         //TODO calculate packet count deltas or maybe not, when drilling down you get the packet count of new flow rules
 
         Collections.sort(totalMatchesAndCounts, new TripletComparator());
-        System.out.println("Received " + totalMatchesAndCounts.size() + "stats");
+        System.out.println("Received " + totalMatchesAndCounts.size() + " stats");
     }
 
     private long[][] createAggregationMap(List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> matchesAndCounts) {

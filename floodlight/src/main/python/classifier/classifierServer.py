@@ -58,7 +58,7 @@ def manage_inputs():
             prompt_shown = False
 
 def communicate_with_java():
-    classifier = cl.Classifier(32,1,False)
+    classifier = cl.Classifier(16,1,False)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind("tcp://localhost:5555")
@@ -71,11 +71,24 @@ def communicate_with_java():
 
         if socket in socks and socks[socket] == zmq.POLLIN:
             try :
+                receive_time_ns = time.time_ns()
+
                 message = socket.recv_string()
                 print(f"Received Aggregation Map")
-                agg_map_list = json.loads(message)
-                np_agg_map = np.array(agg_map_list)
-                print(np_agg_map)
+                json_data = json.loads(message)
+                agg_map = json_data["aggMap"]
+
+
+                timestamp = json_data["timestamp"]
+
+                print(f"Python timestamp {receive_time_ns}")
+                print(f"Java timestamp {timestamp}")
+
+                sendTime = receive_time_ns - timestamp
+
+                print(f"Sending latency: {sendTime}")
+                np_agg_map = np.array(agg_map)
+                #print(np_agg_map)
                 classifier.classify(np_agg_map,0)
             
             except Exception as e:
