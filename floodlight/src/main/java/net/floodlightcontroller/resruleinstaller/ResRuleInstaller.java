@@ -81,8 +81,8 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private long sendingTime = 0;
     private long ddStart = 0;
     private boolean flowsSent = false;
-    private int measurements = 101;
-    private boolean write = false;
+    private int measurements = 103;
+    private boolean write = true;
     private boolean drillDownEnded = false;
     private ClassifierExecutor classifierExecutor = new ClassifierExecutor();
     ExecutorService executor = Executors.newFixedThreadPool(1);
@@ -301,14 +301,8 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
                         JSONObject jsonMessage = new JSONObject();
 
-                        // Get the current instant (timestamp)
-                        Instant now = Instant.now();
-
-                        // Convert to epoch nanoseconds
-                        long unixTimeNano = now.toEpochMilli() * 1_000_000L + now.getNano();
-
                         try {
-                            jsonMessage.put("timestamp", unixTimeNano);
+                            
                             jsonMessage.put("aggMap", aggMapJSON);
                         } catch (JSONException e) {
                             System.out.println("Creation of JSON object failed: " + e);
@@ -343,14 +337,14 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                             ddIterTime -= (double) expTimeMillis / 1000; //Remove exposure time
                             System.out.println("Drilldown iteration " + ddStep + " took " + ddIterTime + " seconds.");
                             
-                            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+                            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000000");
                             String ddIterString = decimalFormat.format(ddIterTime);
                             String[] resAndLat = new String[]{String.valueOf(res), ddIterString};
                             String newData = CSVWriter.convertToCSV(resAndLat);
                             try {
-                                CSVWriter.writeToCsv("~/floodlight/results/dd_iteration_latency.csv", newData, write);
+                                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/dd_iteration_latency.csv", newData, write);
                             } catch (IOException e) {
-                                logger.info("CSV Writer fn exploded lfmao");
+                                logger.info("CSV Writer fn exploded lfmao\n" + e);
                             }
 
                         }
@@ -365,7 +359,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             double ddTimeSeconds = (double) ddTimeNano/1000000000;
             System.out.println("Drilldown time with exposure time: " + ddTimeSeconds);
             ddTimeSeconds -= ddStep; //Remove exposure time seconds
-            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000000");
             String ddTimeString = decimalFormat.format(ddTimeSeconds);
             String[] resAndInstLat = new String[]{String.valueOf(res), ddTimeString};
             String newData = CSVWriter.convertToCSV(resAndInstLat);

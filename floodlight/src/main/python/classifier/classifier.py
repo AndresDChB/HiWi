@@ -56,6 +56,7 @@ class Classifier():
         #print(f"Total time from request to classification: {req_to_class_duration} seconds")
         #csv_writer.write('class_from_req.csv', [[self.res, req_to_class_duration]], self.write)
         print(prediction)
+        return prediction
 
 if __name__ == "__main__":
     """ import sys
