@@ -71,7 +71,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private static final String ddIterMeasuremntPath = "";
     private static final String ddMeasuremntPath = "";
 
-    private static final String dataRate = "1000"; //Mbps
+    private static final String dataRate = "3000"; //Mbps
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
@@ -98,7 +98,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private long ddStart = 0;
     private boolean flowsSent = false;
     private boolean deleteMsgSent = false;
-    private int measurements = 1;
+    private int measurements = 103;
     private boolean write = true;
     private boolean drillDownEnded = false;
     private ClassifierExecutor classifierExecutor = new ClassifierExecutor();
@@ -205,7 +205,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             String[] resAndInstLat = new String[]{String.valueOf(res), instTimeString};
             String newData = CSVWriter.convertToCSV(resAndInstLat);
             try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/1G/installation_latency.csv", newData, write);
+                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/3G/installation_latency.csv", newData, write);
             }
             catch (IOException e) {
                 logger.info("CSV Writer fn exploded lfmao");
@@ -224,7 +224,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             String[] resAndDelLat = new String[]{String.valueOf(res), delTimeString};
             String newData = CSVWriter.convertToCSV(resAndDelLat);
             try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/1G/deletion_latency.csv", newData, write);
+                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/3G/deletion_latency.csv", newData, write);
             }
             catch (IOException e) {
                 logger.info("CSV Writer fn exploded lfmao");
@@ -412,7 +412,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                             String[] resAndLat = new String[]{String.valueOf(res), ddIterString};
                             String newData = CSVWriter.convertToCSV(resAndLat);
                             try {
-                                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/1G/dd_iteration.latency.csv", newData, write);
+                                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/3G/dd_iteration.latency.csv", newData, write);
                             } catch (IOException e) {
                                 logger.info("CSV Writer fn exploded lfmao\n" + e);
                             }
@@ -435,7 +435,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             String newData = CSVWriter.convertToCSV(resAndInstLat);
             logger.info("Drilldown done in {} seconds", ddTimeString);
             try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/1G/dd_latency_with_classififcation.csv", newData, write);
+                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/3G/dd_latency_with_classififcation.csv", newData, write);
             }
             catch (IOException e) {
                 logger.info("CSV Writer fn exploded lfmao {}", e);
