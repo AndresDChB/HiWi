@@ -7,6 +7,8 @@ import sys
 import numpy as np
 import json
 import classifier as cl
+sys.path.append('/home/borja/HiWi/floodlight/src/main/python')
+import csv_writer
 
 # Event to signal threads to stop
 stop_event = threading.Event()
@@ -58,6 +60,8 @@ def manage_inputs():
             prompt_shown = False
 
 def communicate_with_java():
+    #TODO add resolution in the config file/CLI
+    res = 16
     classifier = cl.Classifier(16,1,False)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
@@ -77,11 +81,24 @@ def communicate_with_java():
                 json_data = json.loads(message)
                 agg_map = json_data["aggMap"]
 
+                write = json_data['write']
+                write = write.lower() == 'true'
+
                 np_agg_map = np.array(agg_map)
                 #print(np_agg_map)
+
+                prediction_start_time = time.time()
                 prediction  = classifier.classify(np_agg_map,0)
+                prediction_end_time = time.time()
+
+                classification_time = prediction_end_time - prediction_start_time
+
+                print(f"Classification took {classification_time} seconds")
                 print(prediction)
-                print(type(prediction))
+
+
+                csv_writer.write("classification_latency.csv",[[res, classification_time]], write)
+
             
             except Exception as e:
                 print(f"Something went wrong \n {e}")
