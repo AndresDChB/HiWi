@@ -5,7 +5,6 @@ import java.util.concurrent.*;
 import java.text.DecimalFormat;
 import java.io.IOException;
 import java.net.Socket;
-import java.time.Instant;
  
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IOFMessageListener;
@@ -16,34 +15,26 @@ import net.floodlightcontroller.core.module.FloodlightModuleException;
 import net.floodlightcontroller.core.module.IFloodlightModule;
 import net.floodlightcontroller.core.module.IFloodlightService;
 import net.floodlightcontroller.core.internal.IOFSwitchService;
+import net.floodlightcontroller.core.PortChangeType;
+
 import com.google.common.util.concurrent.ListenableFuture;
 
-import org.projectfloodlight.openflow.protocol.OFActionType;
-import org.projectfloodlight.openflow.protocol.OFCapabilities;
-import org.projectfloodlight.openflow.protocol.OFControllerRole;
 import org.projectfloodlight.openflow.protocol.OFFactory;
 import org.projectfloodlight.openflow.protocol.OFMessage;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
-import org.projectfloodlight.openflow.protocol.OFRequest;
 import org.projectfloodlight.openflow.protocol.OFStatsReply;
 import org.projectfloodlight.openflow.protocol.OFFlowStatsRequest;
 import org.projectfloodlight.openflow.protocol.OFFlowStatsReply;
 import org.projectfloodlight.openflow.protocol.OFFlowStatsEntry;
-import org.projectfloodlight.openflow.protocol.OFStatsRequest;
 import org.projectfloodlight.openflow.protocol.OFFlowAdd;
 import org.projectfloodlight.openflow.protocol.match.Match;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
-import org.projectfloodlight.openflow.protocol.match.MatchFields;
 import org.projectfloodlight.openflow.protocol.OFBarrierRequest;
-import org.projectfloodlight.openflow.protocol.OFBarrierReply;
-import org.projectfloodlight.openflow.protocol.OFMessage;
 import org.projectfloodlight.openflow.protocol.OFType;
 import org.projectfloodlight.openflow.protocol.OFFlowDelete;
-import org.projectfloodlight.openflow.protocol.OFFlowDelete.Builder;
 import org.projectfloodlight.openflow.types.*;
 
 import net.floodlightcontroller.core.IFloodlightProviderService;
-import net.floodlightcontroller.packet.Ethernet;
 
 import org.zeromq.ZMQ;
 import org.zeromq.ZMQ.Poller;
@@ -54,8 +45,6 @@ import org.json.JSONObject;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.projectfloodlight.openflow.protocol.OFPortDesc;
-import net.floodlightcontroller.core.PortChangeType;
 
 import org.javatuples.Triplet;
 
@@ -63,21 +52,21 @@ import csvwriter.CSVWriter;
  
 public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, IOFSwitchListener {
     
-    //TODO constants for socket host and port
-
+   
+    //Traffic generation server host and port
     private static final String TR_GEN_SERVER_HOST = "172.22.123.21";
     private static final int TR_GEN_SERVER_PORT = 12345;
 
-    private static final String ddIterMeasuremntPath = "";
-    private static final String ddMeasuremntPath = "";
-
+    //Data rate at which Trex will generate traffic
     private static final String dataRate = "9800"; //Mbps
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
-    private int res = 16;
-    private long expTimeMillis = 1000;
+
+    private int res = 16; //Subnet resolution
+    private long expTimeMillis = 1000; //Exposure time in milliseconds
+    
     //For drilldown experiments
     private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
     
@@ -91,18 +80,35 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
 
     private int barrierReplies = 0;
+
+    //Set to true if connection with the python CNN app has been established
     private boolean classifierConnected = false;
+    //Set to true if connection with the other server's traffic generation app has been established
     private boolean trGenConnected = false;
-    private long sendingTime = 0;
-    private long deletionTime = 0;
-    private long ddStart = 0;
+
+    private long sendingTime = 0; //Timestamp of the moment when flow rules are sent
+    private long deletionTime = 0; //Timestamp of the moment when a flow deletion request is sent
+    private long ddStart = 0; //Timestamp of the moment a drilldown starts
+
+    //Barrier replies dont explain which action caused them
+    //These flags are set by flow installation and deletion operations 
+    //so that when a barrier reply arrives we can know what caused it
     private boolean flowsSent = false;
     private boolean deleteMsgSent = false;
-    private int measurements = 103;
-    private boolean write = true;
-    private boolean drillDownEnded = false;
-    private ClassifierExecutor classifierExecutor = new ClassifierExecutor();
+    
+    private int measurements = 103; //Number of measurements taken
+    private boolean write = true; //If the measurements are written to a csv or not
+
+    //Set to true when the subnet granularity cannot become higher inidicating
+    //the end of the drilldown
+    private boolean drillDownEnded = false; 
+
+
+    //For sending messages to the switch, classifier and traffic gen server
+    //in another thread to prevent blocking the other controller functions
     ExecutorService executor = Executors.newFixedThreadPool(1);
+
+    //Stores the initial subnets of the resolution prior to a drilldown
     private String[] initialSubnets;
 
     @Override
@@ -146,7 +152,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     public void init(FloodlightModuleContext context)
             throws FloodlightModuleException {
         
-                
         boolean serverAvailableClassifier = isServerAvailable("localhost", 5555);
         if (serverAvailableClassifier) {
             System.out.println("Connected to classifier");
@@ -154,13 +159,11 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }
 
         boolean serverAvailableTrGen = isServerAvailable(TR_GEN_SERVER_HOST, TR_GEN_SERVER_PORT);
-
         if (serverAvailableTrGen) {
             System.out.println("Connected to traffic generation server");
             trGenConnected = true;
         }
         
-
         socketClassifier.connect("tcp://localhost:5555");
         socketTrGen.connect("tcp://" + TR_GEN_SERVER_HOST + ":" + TR_GEN_SERVER_PORT);
 
@@ -171,6 +174,10 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         logger = LoggerFactory.getLogger(ResRuleInstaller.class);
         
         logger.info("Rule installer initiated");
+        addShutdownHook();
+    }
+
+    private void addShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("Shutdown hook triggered. Shutting down executor...");
             // Clean up
@@ -181,7 +188,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             executor.shutdownNow(); // This interrupts running tasks
             System.out.println("Shutdown complete.");
         }));
-        
     }
  
     @Override
@@ -189,46 +195,42 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         this.floodlightProvider.addOFMessageListener(OFType.BARRIER_REPLY, this);
         this.switchService.addOFSwitchListener(this);
     }
- 
+    
+    private void measureReplyLatency(long timeStamp, String fileName, String description) {
+        long receptionTime = System.nanoTime();
+        long timeNano = receptionTime - timeStamp;
+        double timeSeconds = (double)timeNano/1000000000;
+        logger.info("{} reply received after {} seconds", description, timeSeconds);
+
+        DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
+        String timeString = decimalFormat.format(timeSeconds);
+        String[] resAndInstLat = new String[]{String.valueOf(res), timeString};
+        String newData = CSVWriter.convertToCSV(resAndInstLat);
+        try {
+            CSVWriter.writeToCsv(fileName, newData, write);
+        }
+        catch (IOException e) {
+            logger.info("CSV Writer fn exploded lfmao");
+        }
+    }
+
     @Override
     public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
         logger.info("Message received of type: {}", msg.getType());
 
         if (flowsSent) {
-            long receptionTime = System.nanoTime();
-            long instTimeNano = receptionTime - sendingTime;
-            double instTimeSeconds = (double)instTimeNano/1000000000;
-            logger.info("Flow installation reply received after {} seconds", instTimeSeconds);
-
-            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
-            String instTimeString = decimalFormat.format(instTimeSeconds);
-            String[] resAndInstLat = new String[]{String.valueOf(res), instTimeString};
-            String newData = CSVWriter.convertToCSV(resAndInstLat);
-            try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/9_8G/installation_latency.csv", newData, write);
-            }
-            catch (IOException e) {
-                logger.info("CSV Writer fn exploded lfmao");
-            }
+            measureReplyLatency(sendingTime, 
+                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/installation_latency.csv", 
+                "Flow installation");
             flowsSent = false;
         }
 
         if (deleteMsgSent) {
-            long receptionTime = System.nanoTime();
-            long delTimeNano = receptionTime - deletionTime;
-            double delTimeSeconds = (double)delTimeNano/1000000000;
-            logger.info("Flow deletion reply received after {} seconds", delTimeSeconds);
-
-            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
-            String delTimeString = decimalFormat.format(delTimeSeconds);
-            String[] resAndDelLat = new String[]{String.valueOf(res), delTimeString};
-            String newData = CSVWriter.convertToCSV(resAndDelLat);
-            try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/9_8G/deletion_latency.csv", newData, write);
-            }
-            catch (IOException e) {
-                logger.info("CSV Writer fn exploded lfmao");
-            }
+            measureReplyLatency(
+                deletionTime,
+                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/deletion_latency.csv",
+                "Flow deletion"
+            );
             deleteMsgSent = false;
         }
 
@@ -244,11 +246,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             @Override
             public void run() {
 
+                //TODO create class variable and depending on it choose one of these three
+
                 // This is for flow installation experiments
                 //flowInstallLoop(switchId); 
 
                 //This is for drilldown experiments
-                ddStart = System.nanoTime();
                 drillDownTest(switchId);
 
                 //Installation and deletion experiments
@@ -289,42 +292,81 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 System.out.println("Expected Rules: 0");
                 System.out.println("Number of installed flow rules: " + totalMatchesAndCounts.size());
     }
+
+    private void sleepSeconds(long timeout, String message) {
+        try {
+            TimeUnit.SECONDS.sleep(timeout); 
+        }
+        catch(InterruptedException e) { 
+            logger.error(message);
+        }
+    }
+
+    private void sleepMillis(long timeout, String message) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(timeout);
+        }
+        catch(InterruptedException e) {
+            logger.info(message);
+        }
+    }
+
+    private void waitTrReply(Poller trGenPoller) {
+          // Poll for events
+          trGenPoller.poll(5000); // Timeout in milliseconds
+
+          if (trGenPoller.pollin(0)) {
+              // Receive message if available
+      
+              String message = socketTrGen.recvStr(0);
+              if (message != null) {
+                  System.out.println("Received: " + message);
+              }
+          }
+    }
+
+    private JSONObject classifierJSON(long[][] aggregationMap) {
+        JSONArray aggMapJSON = new JSONArray();
+        for (long[] row : aggregationMap) {
+            JSONArray rowArray = new JSONArray();
+            for (long value : row) {
+                rowArray.put(value);
+            }
+            aggMapJSON.put(rowArray);
+        }
+
+        JSONObject jsonMessage = new JSONObject();
+
+        try {
+            jsonMessage.put("write", String.valueOf(write));
+            jsonMessage.put("aggMap", aggMapJSON);
+        } catch (JSONException e) {
+            System.out.println("Creation of JSON object failed: " + e);
+        }
+
+        return jsonMessage;
+    }
+
     //TODO separete this into more functions
     private void drillDownTest(DatapathId switchId) {
         String subnetBase = "0.0.0.0";
         int subnetMask = 0;
 
         int waitTime = 3;
-        try {
-            TimeUnit.SECONDS.sleep(waitTime); 
-        }
-        catch(InterruptedException e) { 
-            logger.error("Initial wait time interrupted");
-        }
+
+        sleepSeconds(waitTime, "Initial wait time interrupted");
+      
         logger.info("Drilldown started");
         
         Poller trGenPoller = socketContextTrGen.poller(1); // Poller for 1 socket
         trGenPoller.register(socketTrGen, Poller.POLLIN);
 
         if (trGenConnected) {
-            send_tr_message("start", String.valueOf(res), String.valueOf(write), dataRate, "0", String.valueOf(measurements));
+            sendTrMessage("start", String.valueOf(res), String.valueOf(write), dataRate, "0", String.valueOf(measurements));
             // Wait for the reply from the server
-            
-
             System.out.println("Waiting for response");
-            // Poll for events
-            trGenPoller.poll(5000); // Timeout in milliseconds
-
-            if (trGenPoller.pollin(0)) {
-                // Receive message if available
-        
-                String message = socketTrGen.recvStr(0);
-                if (message != null) {
-                    System.out.println("Received: " + message);
-                }
-            }
+            waitTrReply(trGenPoller);
         }
-        
         
         for (int i = 0; i < measurements; i++) {
             int ddStep = 1;
@@ -339,12 +381,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 subnetMask += (int) (Math.log(res)/Math.log(2));
                 
                 //Wait exp time
-                try {
-                    TimeUnit.MILLISECONDS.sleep(expTimeMillis);
-                }
-                catch(InterruptedException e) {
-                    logger.info("Exposure time interrupted");
-                }
+                sleepMillis(expTimeMillis, "Exposure time interrupted");
 
                 //Get stats
                 if (!drillDownEnded) {
@@ -358,26 +395,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                             
                     System.out.println("Number of matches and counts: " + totalMatchesAndCounts.size());
 
-                    JSONArray aggMapJSON = new JSONArray();
-                    for (long[] row : aggregationMap) {
-                        JSONArray rowArray = new JSONArray();
-                        for (long value : row) {
-                            rowArray.put(value);
-                        }
-                        aggMapJSON.put(rowArray);
-                    }
-
                     if (classifierConnected) {
 
-                        JSONObject jsonMessage = new JSONObject();
-
-                        try {
-                            jsonMessage.put("write", String.valueOf(write));
-                            jsonMessage.put("aggMap", aggMapJSON);
-                        } catch (JSONException e) {
-                            System.out.println("Creation of JSON object failed: " + e);
-                        }
-                        
+                        JSONObject jsonMessage = classifierJSON(aggregationMap)
 
                         String jsonString = jsonMessage.toString();
                         System.out.println("Sending agg map to classifier");
@@ -399,10 +419,14 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 
                         String message = socketClassifier.recvStr(0);
                         if (message != null) {
-                            System.out.println("Received: " + message);
+                            System.out.println("Received: " + message); 
+                            //TODO process classifier response
+                            String description = "Drilldown iteration " + ddStep;
+                            measureReplyLatency(ddIterStart, 
+                            "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_iteration.latency.csv", 
+                            description);
+                            
                             long ddIterEnd = System.nanoTime();
-                            System.out.println("Iteration start time: " + ddIterStart);
-                            System.out.println("Iteration end time: " + ddIterEnd);
                             double ddIterTime = (double) (ddIterEnd - ddIterStart) / 1000000000; 
                             ddIterTime -= (double) expTimeMillis / 1000; //Remove exposure time
                             System.out.println("Drilldown iteration " + ddStep + " took " + ddIterTime + " seconds.");
@@ -441,26 +465,17 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 logger.info("CSV Writer fn exploded lfmao {}", e);
             }
             
-            try {
-                TimeUnit.SECONDS.sleep(1); 
-            }
-            catch(InterruptedException e) { 
-                logger.error("Post drilldown wait time interrupted");
-            }
+            sleepSeconds(1, "Post drilldown wait time interrupted");
+
             barrierReplies = 0;
             subnetMask = 0;
             drillDownEnded = false;
 
-            try {
-                TimeUnit.SECONDS.sleep(1); 
-            }
-            catch(InterruptedException e) { 
-                logger.error("Post drilldown wait time interrupted");
-            }
+            sleepSeconds(1, "Post drilldown wait time interrupted");
         }
 
         if (trGenConnected) {
-            send_tr_message("stop", String.valueOf(res), String.valueOf(write), dataRate, "0", String.valueOf(measurements));
+            sendTrMessage("stop", String.valueOf(res), String.valueOf(write), dataRate, "0", String.valueOf(measurements));
             // Wait for the reply from the server
 
             System.out.println("Waiting for response");
@@ -479,7 +494,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
          
     }
 
-    private void send_tr_message(String state, String resolution, String write, String dataRate, String duration, String iterations) {
+    private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
         JSONObject message = new JSONObject();
 
         try {
