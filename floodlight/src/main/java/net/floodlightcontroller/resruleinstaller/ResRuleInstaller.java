@@ -52,13 +52,18 @@ import csvwriter.CSVWriter;
  
 public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, IOFSwitchListener {
     
-   
+    private static final int DRILLDOWN_TREX = 0;
+    private static final int INSTALL_LOOP = 1;
+    private static final int DEL_INST_TEST = 2;
+
+    private int mode = DRILLDOWN_TREX;
+
     //Traffic generation server host and port
     private static final String TR_GEN_SERVER_HOST = "172.22.123.21";
     private static final int TR_GEN_SERVER_PORT = 12345;
 
     //Data rate at which Trex will generate traffic
-    private static final String dataRate = "9800"; //Mbps
+    private static final String dataRate = "0"; //Mbps
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
@@ -66,9 +71,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     private int res = 16; //Subnet resolution
     private long expTimeMillis = 1000; //Exposure time in milliseconds
-    
-    //For drilldown experiments
-    private int expectedBarrierReplies = (int) 32 / (int) (Math.log(res) / Math.log(2)) * 2;
     
     ZMQ.Context socketContextClassifier = ZMQ.context(1);
     ZMQ.Socket socketClassifier = socketContextClassifier.socket(ZMQ.REQ);
@@ -78,8 +80,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     List<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>> totalMatchesAndCounts = 
     new ArrayList<Triplet<Masked<IPv4Address> , Masked<IPv4Address> , U64>>();
-
-    private int barrierReplies = 0;
 
     //Set to true if connection with the python CNN app has been established
     private boolean classifierConnected = false;
@@ -97,7 +97,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private boolean deleteMsgSent = false;
     
     private int measurements = 103; //Number of measurements taken
-    private boolean write = false; //If the measurements are written to a csv or not
+    private boolean write = true; //If the measurements are written to a csv or not
 
     //Set to true when the subnet granularity cannot become higher inidicating
     //the end of the drilldown
@@ -192,7 +192,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
         if (flowsSent) {
             measureLatency(sendingTime, 
-                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/installation_latency.csv", 
+                "/home/borja/HiWi/floodlight/results/idle/installation_latency.csv", 
                 "Flow installation",
                 0);
             flowsSent = false;
@@ -201,14 +201,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         if (deleteMsgSent) {
             measureLatency(
                 deletionTime,
-                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/deletion_latency.csv",
+                "/home/borja/HiWi/floodlight/results/idle/deletion_latency.csv",
                 "Flow deletion",
                 0
             );
             deleteMsgSent = false;
         }
-
-        barrierReplies ++;
 
         return Command.CONTINUE; // Continue with the next listener
     }
@@ -220,16 +218,19 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             @Override
             public void run() {
 
-                //TODO create class variable and depending on it choose one of these three
-
-                // This is for flow installation experiments
-                //flowInstallLoop(switchId); 
-
-                //This is for drilldown experiments
-                drillDownTest(switchId);
-
-                //Installation and deletion experiments
-                //installationAndDeletionTest(switchId);
+                switch (mode) {
+                    case DRILLDOWN_TREX:
+                        drillDownTest(switchId);
+                        break;
+                    case INSTALL_LOOP:
+                        flowInstallLoop(switchId);
+                        break;
+                    case DEL_INST_TEST:
+                        installationAndDeletionTest(switchId);
+                        break;
+                    default:
+                        logger.error("Execution mode unknown");
+                }
             }
         };
         Future<?> future = executor.submit(flowInstRunnable); 
@@ -354,7 +355,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                             double subtraction = (double) expTimeMillis / 1000; 
                             String description = "Drilldown iteration " + ddStep;
                             measureLatency(ddIterStart, 
-                            "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_iteration.latency.csv", 
+                            "/home/borja/HiWi/floodlight/results/idle/dd_iteration.latency.csv", 
                             description,
                             subtraction
                             );
@@ -367,13 +368,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             ddStep --; //Remove last increment as the last iteration only detects whether the drilldown has ended
             
             measureLatency(ddStart, 
-                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_latency_with_classififcation.csv",
+                "/home/borja/HiWi/floodlight/results/idle/dd_latency_with_classififcation.csv",
                 "Drilldown",
                 ddStep);
             
             sleepSeconds(1, "Post drilldown wait time interrupted");
 
-            barrierReplies = 0;
             subnetMask = 0;
             drillDownEnded = false;
 

@@ -23,7 +23,7 @@ def write(file, data, write):
         print("CSVWriter is turned off")
         return
 
-    directory = '/home/borja/HiWi/floodlight/results/with_traffic/9_8G'  
+    directory = '/home/borja/HiWi/floodlight/results/idle'  
     file_path = os.path.join(directory, file)
 
     if not is_csv_file(file_path):
