@@ -11,3 +11,15 @@ To use the controller for monitoring first start the python classifierServer.py 
 
 After starting the python app go to the /floodlight directory and execute: sudo java -jar target/floodlight.jar
 
+-----------------------------------------------------------------------
+Traffic generation:
+
+TRex: To generate traffic with TRex you have to start TRex in interactive mode in the traffic generation server with
+cd /opt/trex/v3.04/
+sudo ./t-rex-64 -i
+
+Afterwards start the corresponding python server
+
+Tcpreplay:
+
+

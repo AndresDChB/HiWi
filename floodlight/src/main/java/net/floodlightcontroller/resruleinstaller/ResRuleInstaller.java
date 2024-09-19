@@ -55,6 +55,19 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private static final int DRILLDOWN_TREX = 0;
     private static final int INSTALL_LOOP = 1;
     private static final int DEL_INST_TEST = 2;
+    private static final int DRILLDOWN_TCPREPLAY = 3;
+
+    //For drilldowns with tcpreplay
+    //Pcap start delay in milliseconds
+    private int tcprepBGDelay = 0;
+    private int tcprepAttackDelay = 0;
+    private int tcprepTrafficDelay = 0;
+
+    //For drilldowns with tcpreplay
+    //Pcap data rate in mbps
+    private float tcprepBGDataRate = 10;
+    private float tcprepAttackDataRate = 100;
+    private float tcprepTrafficDataRate = 20;
 
     private int mode = DRILLDOWN_TREX;
 
@@ -63,7 +76,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private static final int TR_GEN_SERVER_PORT = 12345;
 
     //Data rate at which Trex will generate traffic
-    private static final String dataRate = "0"; //Mbps
+    private static final String dataRate = "1000"; //Mbps
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
@@ -97,7 +110,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private boolean deleteMsgSent = false;
     
     private int measurements = 103; //Number of measurements taken
-    private boolean write = true; //If the measurements are written to a csv or not
+    private boolean write = false; //If the measurements are written to a csv or not
 
     //Set to true when the subnet granularity cannot become higher inidicating
     //the end of the drilldown
@@ -220,6 +233,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
                 switch (mode) {
                     case DRILLDOWN_TREX:
+                        drillDownTest(switchId);
+                        break;    
+                    case DRILLDOWN_TCPREPLAY:
                         drillDownTest(switchId);
                         break;
                     case INSTALL_LOOP:
@@ -594,7 +610,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     }
 
-    private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
+    private void sendTrexMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
         JSONObject message = new JSONObject();
 
         try {
@@ -612,6 +628,43 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         String jsonString = message.toString();
         System.out.println("Sending message to traffic generation server");
         socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
+    }
+
+    private void sendTcpreplayMessasge(String state, String resolution, String write, String dataRate, String duration) {
+        JSONObject message = new JSONObject();
+
+        try {
+            message.put("state", state);
+            message.put("resolution", resolution);
+            message.put("write", write);
+            message.put("data_rate", dataRate);
+
+            message.put("background_delay", tcprepBGDelay);
+            message.put("attack_delay", tcprepAttackDelay);
+            message.put("traffic_delay", tcprepTrafficDelay);
+            message.put("background_data_rate", tcprepBGDataRate);
+            message.put("attack_data_rate", tcprepAttackDataRate);
+            message.put("traffic_data_rate", tcprepTrafficDataRate);
+            
+        } catch(JSONException e) {
+            System.out.println(e);
+        }
+
+        String jsonString = message.toString();
+        System.out.println("Sending message to traffic generation server");
+        socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
+    }
+
+    private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
+        switch (mode) {
+            case DRILLDOWN_TCPREPLAY:
+                sendTcpreplayMessasge(state, resolution, write, dataRate, duration);
+            case DRILLDOWN_TREX:
+                sendTrexMessage(state, resolution, write, dataRate, duration, iterations);
+            default:
+                System.out.println("Error: Method called unexpectedly");
+        }
+
         
     }
     
