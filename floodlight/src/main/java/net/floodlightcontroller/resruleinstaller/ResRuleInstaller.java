@@ -97,7 +97,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private boolean deleteMsgSent = false;
     
     private int measurements = 103; //Number of measurements taken
-    private boolean write = true; //If the measurements are written to a csv or not
+    private boolean write = false; //If the measurements are written to a csv or not
 
     //Set to true when the subnet granularity cannot become higher inidicating
     //the end of the drilldown
@@ -110,35 +110,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     //Stores the initial subnets of the resolution prior to a drilldown
     private String[] initialSubnets;
-
-    @Override
-    public String getName() {
-        return ResRuleInstaller.class.getSimpleName();
-    }
- 
-    @Override
-    public boolean isCallbackOrderingPrereq(OFType type, String name) {
-        //Auto-generated method stub
-        return false;
-    }
- 
-    @Override
-    public boolean isCallbackOrderingPostreq(OFType type, String name) {
-        //Auto-generated method stub
-        return false;
-    }
- 
-    @Override
-    public Collection<Class<? extends IFloodlightService>> getModuleServices() {
-        //Auto-generated method stub
-        return null;
-    }
- 
-    @Override
-    public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
-        //Auto-generated method stub
-        return null;
-    }
  
     @Override
     public Collection<Class<? extends IFloodlightService>> getModuleDependencies() {
@@ -196,11 +167,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         this.switchService.addOFSwitchListener(this);
     }
     
-    private void measureReplyLatency(long timeStamp, String fileName, String description) {
+    private void measureLatency(long timeStamp, String fileName, String description, double subtraction) {
         long receptionTime = System.nanoTime();
         long timeNano = receptionTime - timeStamp;
         double timeSeconds = (double)timeNano/1000000000;
-        logger.info("{} reply received after {} seconds", description, timeSeconds);
+        timeSeconds -= subtraction;
+        logger.info("{} done after {} seconds", description, timeSeconds);
 
         DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000");
         String timeString = decimalFormat.format(timeSeconds);
@@ -219,17 +191,19 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         logger.info("Message received of type: {}", msg.getType());
 
         if (flowsSent) {
-            measureReplyLatency(sendingTime, 
+            measureLatency(sendingTime, 
                 "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/installation_latency.csv", 
-                "Flow installation");
+                "Flow installation",
+                0);
             flowsSent = false;
         }
 
         if (deleteMsgSent) {
-            measureReplyLatency(
+            measureLatency(
                 deletionTime,
                 "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/deletion_latency.csv",
-                "Flow deletion"
+                "Flow deletion",
+                0
             );
             deleteMsgSent = false;
         }
@@ -260,7 +234,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         };
         Future<?> future = executor.submit(flowInstRunnable); 
     }
-
+    /*
+    *Delete flows rules, wait, install new rules, delete them again
+    *This function checks the correct installation and deletion by 
+    *making a stats request and comparing the number of replies to
+    *their expected number
+    */ 
     private void installationAndDeletionTest(DatapathId switchId) {
         IOFSwitch sw = switchService.getSwitch(switchId);
 
@@ -293,63 +272,17 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                 System.out.println("Number of installed flow rules: " + totalMatchesAndCounts.size());
     }
 
-    private void sleepSeconds(long timeout, String message) {
-        try {
-            TimeUnit.SECONDS.sleep(timeout); 
-        }
-        catch(InterruptedException e) { 
-            logger.error(message);
-        }
-    }
-
-    private void sleepMillis(long timeout, String message) {
-        try {
-            TimeUnit.MILLISECONDS.sleep(timeout);
-        }
-        catch(InterruptedException e) {
-            logger.info(message);
-        }
-    }
-
-    private void waitTrReply(Poller trGenPoller) {
-          // Poll for events
-          trGenPoller.poll(5000); // Timeout in milliseconds
-
-          if (trGenPoller.pollin(0)) {
-              // Receive message if available
-      
-              String message = socketTrGen.recvStr(0);
-              if (message != null) {
-                  System.out.println("Received: " + message);
-              }
-          }
-    }
-
-    private JSONObject classifierJSON(long[][] aggregationMap) {
-        JSONArray aggMapJSON = new JSONArray();
-        for (long[] row : aggregationMap) {
-            JSONArray rowArray = new JSONArray();
-            for (long value : row) {
-                rowArray.put(value);
-            }
-            aggMapJSON.put(rowArray);
-        }
-
-        JSONObject jsonMessage = new JSONObject();
-
-        try {
-            jsonMessage.put("write", String.valueOf(write));
-            jsonMessage.put("aggMap", aggMapJSON);
-        } catch (JSONException e) {
-            System.out.println("Creation of JSON object failed: " + e);
-        }
-
-        return jsonMessage;
-    }
-
-    //TODO separete this into more functions
+    /*
+     * Performs a series of drilldowns determined by the "measurements"
+     * class variable. 
+     * This method measures the following latencies:
+     * -Flow installation -Flow deletion
+     * -Complete drilldown -Drilldown iteration
+     * 
+     * The classification latency is measured by the classifier python app
+     */
     private void drillDownTest(DatapathId switchId) {
-        String subnetBase = "0.0.0.0";
+        String subnetBase = "0.0.0.0"; //Base for the drilldown's mock subnet
         int subnetMask = 0;
 
         int waitTime = 3;
@@ -375,7 +308,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
                 //Drilldown
                 long ddIterStart = System.nanoTime();
-                String subnet = subnetBase + "/" + String.valueOf(subnetMask);
+                String subnet = subnetBase + "/" + String.valueOf(subnetMask); //Mock subnet
                 logger.info("Drilling down into subnet {}", subnet);
                 drillDown(subnet, switchId);
                 subnetMask += (int) (Math.log(res)/Math.log(2));
@@ -396,15 +329,12 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                     System.out.println("Number of matches and counts: " + totalMatchesAndCounts.size());
 
                     if (classifierConnected) {
-
-                        JSONObject jsonMessage = classifierJSON(aggregationMap)
-
+                        JSONObject jsonMessage = classifierJSON(aggregationMap);
                         String jsonString = jsonMessage.toString();
                         System.out.println("Sending agg map to classifier");
                         socketClassifier.send(jsonString.getBytes(ZMQ.CHARSET), 0);
                         System.out.println("Sending done");
                     }
-
                     
                     // Wait for the reply from the server
                     Poller poller = socketContextClassifier.poller(1); // Poller for 1 socket
@@ -421,49 +351,25 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
                         if (message != null) {
                             System.out.println("Received: " + message); 
                             //TODO process classifier response
+                            double subtraction = (double) expTimeMillis / 1000; 
                             String description = "Drilldown iteration " + ddStep;
-                            measureReplyLatency(ddIterStart, 
+                            measureLatency(ddIterStart, 
                             "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_iteration.latency.csv", 
-                            description);
-                            
-                            long ddIterEnd = System.nanoTime();
-                            double ddIterTime = (double) (ddIterEnd - ddIterStart) / 1000000000; 
-                            ddIterTime -= (double) expTimeMillis / 1000; //Remove exposure time
-                            System.out.println("Drilldown iteration " + ddStep + " took " + ddIterTime + " seconds.");
-                            
-                            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000000");
-                            String ddIterString = decimalFormat.format(ddIterTime);
-                            String[] resAndLat = new String[]{String.valueOf(res), ddIterString};
-                            String newData = CSVWriter.convertToCSV(resAndLat);
-                            try {
-                                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_iteration.latency.csv", newData, write);
-                            } catch (IOException e) {
-                                logger.info("CSV Writer fn exploded lfmao\n" + e);
-                            }
+                            description,
+                            subtraction
+                            );
 
                         }
                     }
                 }
-                
                 ddStep++;
             }
             ddStep --; //Remove last increment as the last iteration only detects whether the drilldown has ended
             
-            long ddTimeNano = System.nanoTime() - ddStart;
-            double ddTimeSeconds = (double) ddTimeNano/1000000000;
-            System.out.println("Drilldown time with exposure time: " + ddTimeSeconds);
-            ddTimeSeconds -= ddStep; //Remove exposure time seconds
-            DecimalFormat decimalFormat = new DecimalFormat("#,##0.000000000");
-            String ddTimeString = decimalFormat.format(ddTimeSeconds);
-            String[] resAndInstLat = new String[]{String.valueOf(res), ddTimeString};
-            String newData = CSVWriter.convertToCSV(resAndInstLat);
-            logger.info("Drilldown done in {} seconds", ddTimeString);
-            try {
-                CSVWriter.writeToCsv("/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_latency_with_classififcation.csv", newData, write);
-            }
-            catch (IOException e) {
-                logger.info("CSV Writer fn exploded lfmao {}", e);
-            }
+            measureLatency(ddStart, 
+                "/home/borja/HiWi/floodlight/results/with_traffic/9_8G/dd_latency_with_classififcation.csv",
+                "Drilldown",
+                ddStep);
             
             sleepSeconds(1, "Post drilldown wait time interrupted");
 
@@ -479,42 +385,9 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             // Wait for the reply from the server
 
             System.out.println("Waiting for response");
-            // Poll for events
-            trGenPoller.poll(5000); // Timeout in milliseconds
-
-            if (trGenPoller.pollin(0)) {
-                // Receive message if available
-        
-                String message = socketTrGen.recvStr(0);
-                if (message != null) {
-                    System.out.println("Received: " + message);
-                }
-            }
+            waitTrReply(trGenPoller);
         }
-         
     }
-
-    private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
-        JSONObject message = new JSONObject();
-
-        try {
-            message.put("state", state);
-            message.put("resolution", resolution);
-            message.put("write", write);
-            message.put("data_rate", dataRate);
-            message.put("duration", duration);
-            message.put("iterations", iterations);
-            
-        } catch(JSONException e) {
-            System.out.println(e);
-        }
-
-        String jsonString = message.toString();
-        System.out.println("Sending message to traffic generation server");
-        socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
-        
-    }
-
 
     //Installs and uninstalls flow rules in a loop to gather install latency information
     private void flowInstallLoop(DatapathId switchId) {
@@ -649,20 +522,8 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
 
     }
 
-    private <T> List<List<T>> splitList(List<T> originalList) {
-        List<List<T>> sublists = new ArrayList<>();
-        int size = originalList.size();
-        int chunkSize = (res == 64) ? 4096 : 1024;
-        
-        for (int i = 0; i < size; i += chunkSize) {
-            sublists.add(new ArrayList<>(originalList.subList(i, Math.min(size, i + chunkSize))));
-        }
-        
-        return sublists;
-    }
-
     /*Returns true while the max depth has not been reached
-    *@subnet destination (for now) subnet where the drill down occurs
+    *@subnet destination subnet where the drill down occurs
     *
     */
     private void drillDown(String subnet, DatapathId switchId) {
@@ -686,34 +547,6 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         List<OFMessage> drillDownFlows = createMatches(initialSubnets, drillDownSubnets, sw);
         logger.info("Drilldown rules created");
         installFlows(switchId, drillDownFlows);
-        
-    }
-    
-    @Override
-    public void switchRemoved(DatapathId switchId){
-        logger.info("Switch removed");
-    }   
-
-    @Override
-    public void switchActivated(DatapathId switchId){
-        logger.info("Swicth activated");
-    }
-
-    @Override
-    public void switchPortChanged(DatapathId switchId,
-                                  OFPortDesc port,
-                                  PortChangeType type){
-        
-        
-    }
-
-    @Override
-    public void switchChanged(DatapathId switchId){
-        
-    }
-
-    @Override
-    public void switchDeactivated(DatapathId switchId){
         
     }
     
@@ -760,9 +593,28 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         */
 
     }
+
+    private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
+        JSONObject message = new JSONObject();
+
+        try {
+            message.put("state", state);
+            message.put("resolution", resolution);
+            message.put("write", write);
+            message.put("data_rate", dataRate);
+            message.put("duration", duration);
+            message.put("iterations", iterations);
+            
+        } catch(JSONException e) {
+            System.out.println(e);
+        }
+
+        String jsonString = message.toString();
+        System.out.println("Sending message to traffic generation server");
+        socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
         
-
-
+    }
+    
     private void getStats(IOFSwitch sw, ListenableFuture<?> future){
         List<OFStatsReply> values = null;
         
@@ -859,6 +711,72 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }
     }
 
+    private void sleepSeconds(long timeout, String message) {
+        try {
+            TimeUnit.SECONDS.sleep(timeout); 
+        }
+        catch(InterruptedException e) { 
+            logger.error(message);
+        }
+    }
+
+    private void sleepMillis(long timeout, String message) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(timeout);
+        }
+        catch(InterruptedException e) {
+            logger.info(message);
+        }
+    }
+
+    private <T> List<List<T>> splitList(List<T> originalList) {
+        List<List<T>> sublists = new ArrayList<>();
+        int size = originalList.size();
+        int chunkSize = (res == 64) ? 4096 : 1024;
+        
+        for (int i = 0; i < size; i += chunkSize) {
+            sublists.add(new ArrayList<>(originalList.subList(i, Math.min(size, i + chunkSize))));
+        }
+        
+        return sublists;
+    }
+
+    private void waitTrReply(Poller trGenPoller) {
+          // Poll for events
+          trGenPoller.poll(5000); // Timeout in milliseconds
+
+          if (trGenPoller.pollin(0)) {
+              // Receive message if available
+      
+              String message = socketTrGen.recvStr(0);
+              if (message != null) {
+                  System.out.println("Received: " + message);
+              }
+          }
+    }
+
+    private JSONObject classifierJSON(long[][] aggregationMap) {
+        JSONArray aggMapJSON = new JSONArray();
+        for (long[] row : aggregationMap) {
+            JSONArray rowArray = new JSONArray();
+            for (long value : row) {
+                rowArray.put(value);
+            }
+            aggMapJSON.put(rowArray);
+        }
+
+        JSONObject jsonMessage = new JSONObject();
+
+        try {
+            jsonMessage.put("write", String.valueOf(write));
+            jsonMessage.put("aggMap", aggMapJSON);
+        } catch (JSONException e) {
+            System.out.println("Creation of JSON object failed: " + e);
+        }
+
+        return jsonMessage;
+    }
+
     static class TripletComparator implements Comparator<Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64>> {
         @Override
         public int compare(Triplet<Masked<IPv4Address>, Masked<IPv4Address>, U64> t1,
@@ -890,5 +808,62 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
             System.out.println(e);
             return false;  // Server is not available
         }
+    }
+
+    @Override
+    public void switchRemoved(DatapathId switchId){
+        logger.info("Switch removed");
+    }   
+
+    @Override
+    public void switchActivated(DatapathId switchId){
+        logger.info("Swicth activated");
+    }
+
+    @Override
+    public void switchPortChanged(DatapathId switchId,
+                                  OFPortDesc port,
+                                  PortChangeType type){
+        
+        
+    }
+
+    @Override
+    public void switchChanged(DatapathId switchId){
+        
+    }
+
+    @Override
+    public void switchDeactivated(DatapathId switchId){
+        
+    }
+
+    @Override
+    public String getName() {
+        return ResRuleInstaller.class.getSimpleName();
+    }
+ 
+    @Override
+    public boolean isCallbackOrderingPrereq(OFType type, String name) {
+        //Auto-generated method stub
+        return false;
+    }
+ 
+    @Override
+    public boolean isCallbackOrderingPostreq(OFType type, String name) {
+        //Auto-generated method stub
+        return false;
+    }
+ 
+    @Override
+    public Collection<Class<? extends IFloodlightService>> getModuleServices() {
+        //Auto-generated method stub
+        return null;
+    }
+ 
+    @Override
+    public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
+        //Auto-generated method stub
+        return null;
     }
 }
