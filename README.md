@@ -20,6 +20,9 @@ sudo ./t-rex-64 -i
 
 Afterwards start the corresponding python server
 
+Remember to bind the interfaces with dpdk-devbind to the vfio-pci driver beforehand
+
 Tcpreplay:
 
 
+Remember to bind the interfaces with dpdk-devbind to the i40e driver beforehand

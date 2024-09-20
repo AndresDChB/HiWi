@@ -10,7 +10,7 @@ import sys
 
 host = "172.22.123.21"
 port = "12345"
-interface = "enslmao"
+interface = "enp179s0f2"
 
 # Hardcoded pcap paths
 PCAPS = {
