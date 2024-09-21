@@ -30,5 +30,4 @@ net.floodlightcontroller.statistics.StatisticsCollector
 net.floodlightcontroller.routing.RoutingManager
 net.floodlightcontroller.cpanalyzer.CPAnalyzer
 net.floodlightcontroller.hasupport.HAController
-net.floodlightcontroller.resruleinstaller.ResRuleInstaller
-net.floodlightcontroller.packetmonitor.PacketMonitor
+net.floodlightcontroller.trafficMonitor.TrafficMonitor

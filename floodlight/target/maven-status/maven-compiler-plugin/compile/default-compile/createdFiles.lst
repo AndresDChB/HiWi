@@ -168,11 +168,13 @@ net/floodlightcontroller/hasupport/ServerChannelInboundHandler.class
 net/floodlightcontroller/core/IOFSwitchBackend.class
 net/floodlightcontroller/devicemanager/internal/AttachmentPoint.class
 net/floodlightcontroller/core/IOFSwitch$SwitchStatus.class
+net/floodlightcontroller/trafficMonitor/TrafficMonitor$TripletComparator.class
 net/floodlightcontroller/packet/ARP.class
 net/floodlightcontroller/topology/web/TunnelLinksResource.class
 net/floodlightcontroller/linkdiscovery/web/ExternalLinksResource.class
 net/floodlightcontroller/core/web/ControllerVersionResource.class
 net/floodlightcontroller/core/internal/HandshakeTimeoutHandler.class
+net/floodlightcontroller/trafficMonitor/TrafficMonitor$1.class
 net/floodlightcontroller/storage/nosql/NoSqlStorageSource$NoSqlCompoundPredicate$RowComparator.class
 net/floodlightcontroller/linkdiscovery/ILinkDiscovery$SwitchType.class
 net/floodlightcontroller/loadbalancer/PoolsResource.class
@@ -275,6 +277,7 @@ org/sdnplatform/sync/thrift/DeleteResponseMessage$_Fields.class
 org/sdnplatform/sync/thrift/AsyncMessageHeader.class
 net/floodlightcontroller/topology/TopologyManager$1.class
 org/sdnplatform/sync/thrift/RegisterResponseMessage.class
+net/floodlightcontroller/trafficMonitor/TrafficMonitor.class
 net/floodlightcontroller/core/module/FloodlightModulePriority.class
 net/floodlightcontroller/devicemanager/IEntityClassListener.class
 org/sdnplatform/sync/thrift/EchoReplyMessage.class
@@ -378,6 +381,7 @@ org/sdnplatform/sync/internal/store/VCVersioned.class
 org/sdnplatform/sync/thrift/Store$StoreTupleSchemeFactory.class
 net/floodlightcontroller/accesscontrollist/web/ClearACRulesResource.class
 net/floodlightcontroller/firewall/Firewall.class
+net/floodlightcontroller/trafficMonitor/IpAddrGenerator.class
 net/floodlightcontroller/hasupport/topology/TopoHAWorker.class
 net/floodlightcontroller/debugcounter/CounterNode$1.class
 net/floodlightcontroller/core/HARole.class
@@ -407,7 +411,6 @@ net/floodlightcontroller/virtualnetwork/NetworkResource.class
 org/sdnplatform/sync/thrift/VersionedValue$VersionedValueTupleScheme.class
 net/floodlightcontroller/hasupport/IFilterQueue.class
 org/sdnplatform/sync/thrift/ClockEntry$ClockEntryStandardScheme.class
-net/floodlightcontroller/resruleinstaller/ResRuleInstaller$TripletComparator.class
 net/floodlightcontroller/util/LoadMonitor.class
 net/floodlightcontroller/core/FloodlightContextStore.class
 net/floodlightcontroller/devicemanager/internal/DeviceIndex.class
@@ -425,7 +428,6 @@ org/sdnplatform/sync/thrift/SyncOfferMessage$SyncOfferMessageTupleSchemeFactory.
 org/sdnplatform/sync/thrift/ClusterJoinRequestMessage.class
 net/floodlightcontroller/storage/StorageSourceNotification$Action.class
 net/floodlightcontroller/loadbalancer/LoadBalancer$IPClient.class
-net/floodlightcontroller/resruleinstaller/ResRuleInstaller.class
 org/sdnplatform/sync/internal/store/InMemoryStorageEngine$InMemoryIterator.class
 net/floodlightcontroller/packetstreamer/thrift/PacketStreamer$pushMessageSync_args$pushMessageSync_argsStandardSchemeFactory.class
 net/floodlightcontroller/packetstreamer/thrift/Message$MessageTupleScheme.class
@@ -758,7 +760,6 @@ net/floodlightcontroller/loadbalancer/LBVip.class
 net/floodlightcontroller/flowcache/FRQueryBvsPriority.class
 net/floodlightcontroller/devicemanager/internal/DefaultEntityClassifier.class
 net/floodlightcontroller/cpanalyzer/ICPAnalyzerService.class
-net/floodlightcontroller/resruleinstaller/IpAddrGenerator.class
 net/floodlightcontroller/core/types/SwitchMessagePair.class
 net/floodlightcontroller/packetstreamer/thrift/PacketStreamer$terminateSession_args$terminateSession_argsTupleScheme.class
 net/floodlightcontroller/storage/nosql/NoSqlStorageSource$RowComparator.class
@@ -1030,7 +1031,6 @@ net/floodlightcontroller/core/web/SwitchResourceBase$REQUESTTYPE.class
 org/sdnplatform/sync/internal/SyncManager$UpdateConfigTask.class
 net/floodlightcontroller/core/IListener$Command.class
 net/floodlightcontroller/packet/gtp/GTPHeaderV1$GTPV1ExtHeader.class
-net/floodlightcontroller/resruleinstaller/ResRuleInstaller$1.class
 net/floodlightcontroller/core/internal/INewOFConnectionListener.class
 net/floodlightcontroller/core/internal/OFMessageDecoder.class
 org/sdnplatform/sync/internal/rpc/RPCChannelInitializer.class
