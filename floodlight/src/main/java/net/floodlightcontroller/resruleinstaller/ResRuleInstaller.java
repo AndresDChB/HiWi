@@ -69,7 +69,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private float tcprepAttackDataRate = 100;
     private float tcprepTrafficDataRate = 20;
 
-    private int mode = DRILLDOWN_TREX;
+    private int mode = DRILLDOWN_TCPREPLAY;
 
     //Traffic generation server host and port
     private static final String TR_GEN_SERVER_HOST = "172.22.123.21";
@@ -109,7 +109,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
     private boolean flowsSent = false;
     private boolean deleteMsgSent = false;
     
-    private int measurements = 103; //Number of measurements taken
+    private int measurements = 1; //Number of measurements taken
     private boolean write = false; //If the measurements are written to a csv or not
 
     //Set to true when the subnet granularity cannot become higher inidicating
@@ -320,6 +320,7 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         
         for (int i = 0; i < measurements; i++) {
             int ddStep = 1;
+
             ddStart = System.nanoTime();
             while (!drillDownEnded) {
 
@@ -626,18 +627,17 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }
 
         String jsonString = message.toString();
-        System.out.println("Sending message to traffic generation server");
+        System.out.println("Sending message to trx traffic generation server");
         socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
     }
 
-    private void sendTcpreplayMessasge(String state, String resolution, String write, String dataRate, String duration) {
+    private void sendTcpreplayMessasge(String state, String resolution, String write, SString duration) {
         JSONObject message = new JSONObject();
 
         try {
             message.put("state", state);
             message.put("resolution", resolution);
             message.put("write", write);
-            message.put("data_rate", dataRate);
 
             message.put("background_delay", tcprepBGDelay);
             message.put("attack_delay", tcprepAttackDelay);
@@ -651,16 +651,18 @@ public class ResRuleInstaller implements IOFMessageListener, IFloodlightModule, 
         }
 
         String jsonString = message.toString();
-        System.out.println("Sending message to traffic generation server");
+        System.out.println("Sending message to tcpreplay traffic generation server");
         socketTrGen.send(jsonString.getBytes(ZMQ.CHARSET), ZMQ.NOBLOCK);
     }
 
     private void sendTrMessage(String state, String resolution, String write, String dataRate, String duration, String iterations) {
         switch (mode) {
             case DRILLDOWN_TCPREPLAY:
-                sendTcpreplayMessasge(state, resolution, write, dataRate, duration);
+                sendTcpreplayMessasge(state, resolution, write, duration);
+                break;
             case DRILLDOWN_TREX:
                 sendTrexMessage(state, resolution, write, dataRate, duration, iterations);
+                break;
             default:
                 System.out.println("Error: Method called unexpectedly");
         }

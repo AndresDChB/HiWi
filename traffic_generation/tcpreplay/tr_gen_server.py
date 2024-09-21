@@ -14,9 +14,9 @@ interface = "enp179s0f2"
 
 # Hardcoded pcap paths
 PCAPS = {
-    "background": "/path/to/background.pcap",
-    "traffic": "/path/to/traffic.pcap",
-    "attack": "/path/to/attack.pcap"
+    "background": "/home/borja/pcaps/mawi_background.pcap",
+    "traffic": "/home/borja/pcaps/mawi_background.pcap",
+    "attack": "/home/borja/pcaps/mawi_background.pcap"
 }
 
 # List to keep track of subprocesses
@@ -27,9 +27,15 @@ def replay_pcap(pcap_path, data_rate):
 
     if data_rate != 0:
         #We assume that the string passed as argument is valid
-        process = subprocess.Popen(["tcpreplay", f"-i {interface}", f"--mbps={data_rate}", pcap_path])
+        process = subprocess.Popen(["tcpreplay",f"--intf1={interface}",f"--mbps={data_rate}",pcap_path],
+        stdout=subprocess.PIPE,  # Capture stdout
+        stderr=subprocess.PIPE  # Capture stderr
+        )
     else:
-        process = subprocess.Popen(["tcpreplay", f"-i {interface}", pcap_path])
+        process = subprocess.Popen(["tcpreplay", f"-i {interface}", pcap_path],
+        stdout=subprocess.PIPE,  # Capture stdout
+        stderr=subprocess.PIPE  # Capture stderr
+        )
     
     processes.append(process)
     print(f"Replaying: {pcap_path}")
@@ -38,11 +44,19 @@ def terminate_program():
     # Terminate all subprocesses
     for proc in processes:
         proc.terminate()
-        proc.wait()  # Wait for the process to exit
-    # Clean up ZeroMQ
+        try:
+            proc.wait(timeout=5)  # Wait for process to terminate
+        except subprocess.TimeoutExpired:
+            proc.kill()  # Force kill if it doesn't terminate within the timeout
+        # Capture output after termination
+        stdout, stderr = proc.communicate()
+        print(f"Output from {proc.args}:")
+        print(stdout.decode())
+        if stderr:
+            print("Errors:")
+            print(stderr.decode())
     socket.close()
     context.term()
-    print("Program terminated")
     sys.exit(0)
 
 # Signal handler for graceful shutdown
@@ -64,10 +78,13 @@ print("Server is running and waiting for requests...")
 while True:
     try:
         # Wait for JSON message
-        message = socket.recv_json()
+        message = socket.recv_string()
         print(f"Received message: {message}")
+        if not message:
+            continue
+        json_obj = json.loads(message)
 
-        state = message.get("state", 0)
+        state = json_obj.get("state", 0)
 
         if state == "start":
 
@@ -75,32 +92,32 @@ while True:
             # Extract the delay times from the received JSON
             try:
                 #Delay in ms
-                background_delay = message.get("background_delay", 0)
-                traffic_delay = message.get("traffic_delay", 0)
-                attack_delay = message.get("attack_delay", 0)
+                background_delay = json_obj.get("background_delay", 0)
+                traffic_delay = json_obj.get("traffic_delay", 0)
+                attack_delay = json_obj.get("attack_delay", 0)
 
-                data_rate = message.get("data_rate", 0)
-                data_rate = data_rate.lower() == "true"
 
-                background_data_rate = message.get("background_data_rate",0) if data_rate else 0
-                traffic_data_rate = message.get("traffic_data_rate",0) if data_rate else 0
-                attack_data_rate = message.get("attack_data_rate",0) if data_rate else 0
+                background_data_rate = json_obj.get("background_data_rate",0) 
+                traffic_data_rate = json_obj.get("traffic_data_rate",0) 
+                attack_data_rate = json_obj.get("attack_data_rate",0) 
+
+                print(f"JSON values: {background_delay}, {traffic_delay}, {attack_delay}, {background_data_rate}, {traffic_data_rate}, {attack_data_rate}")
 
                 # Replay the pcaps with the respective delays
                 if background_delay > 0:
                     print(f"Waiting {background_delay} ms before replaying background...")
                     time.sleep(background_delay / 1000)  # Convert ms to seconds
-                    replay_pcap(PCAPS["background"], background_data_rate)
+                replay_pcap(PCAPS["background"], background_data_rate)
 
                 if traffic_delay > 0:
                     print(f"Waiting {traffic_delay} ms before replaying traffic...")
                     time.sleep(traffic_delay / 1000)  # Convert ms to seconds
-                    replay_pcap(PCAPS["traffic"], traffic_data_rate)
+                replay_pcap(PCAPS["traffic"], traffic_data_rate)
 
                 if attack_delay > 0:
                     print(f"Waiting {attack_delay} ms before replaying attack...")
                     time.sleep(attack_delay / 1000)  # Convert ms to seconds
-                    replay_pcap(PCAPS["attack"], attack_data_rate)
+                replay_pcap(PCAPS["attack"], attack_data_rate)
 
                 # Send a response back to the client
                 socket.send_string("PCAPs replayed successfully")

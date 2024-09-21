@@ -25,4 +25,4 @@ Remember to bind the interfaces with dpdk-devbind to the vfio-pci driver beforeh
 Tcpreplay:
 
 
-Remember to bind the interfaces with dpdk-devbind to the i40e driver beforehand
+Remember to bind the interfaces with dpdk-devbind to the i40e driver beforehand. Put the interfaces up after that.
