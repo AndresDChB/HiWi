@@ -3,6 +3,7 @@ import json
 import subprocess
 import time
 import signal
+import os
 import sys
 
 #TODO Implement functionality to get the data rate stats from the 3 subprocesses and write to a csv
@@ -43,11 +44,12 @@ def replay_pcap(pcap_path, data_rate):
 def terminate_program():
     # Terminate all subprocesses
     for proc in processes:
-        proc.terminate()
+        os.kill(proc.pid, signal.SIGINT)
         try:
-            proc.wait(timeout=5)  # Wait for process to terminate
+            proc.wait(timeout=5)  # Wait for the process to terminate
         except subprocess.TimeoutExpired:
-            proc.kill()  # Force kill if it doesn't terminate within the timeout
+            print(f"Process {proc.pid} did not terminate in time, killing it...")
+            proc.kill()  # Force kill if not terminated
         # Capture output after termination
         stdout, stderr = proc.communicate()
         print(f"Output from {proc.args}:")
@@ -57,6 +59,7 @@ def terminate_program():
             print(stderr.decode())
     socket.close()
     context.term()
+    time.sleep(1)
     sys.exit(0)
 
 # Signal handler for graceful shutdown
@@ -126,6 +129,7 @@ while True:
                 print(f"Invalid JSON structure: {e}")
                 socket.send_string("Error: Invalid JSON structure")
         elif state == "stop":
+            socket.send_string("Stopping pcap replay")
             terminate_program()
         else:
             print("Unknown state")
