@@ -59,31 +59,31 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
 
     //For drilldowns with tcpreplay
     //Pcap start delay in milliseconds
-    private int tcprepBGDelay = 0;
-    private int tcprepAttackDelay = 0;
-    private int tcprepTrafficDelay = 0;
+    private int tcprepBGDelay;
+    private int tcprepAttackDelay;
+    private int tcprepTrafficDelay;
 
     //For drilldowns with tcpreplay
     //Pcap data rate in mbps
-    private float tcprepBGDataRate = 10;
-    private float tcprepAttackDataRate = 100;
-    private float tcprepTrafficDataRate = 20;
+    private float tcprepBGDataRate;
+    private float tcprepAttackDataRate;
+    private float tcprepTrafficDataRate;
 
-    private int mode = DRILLDOWN_TCPREPLAY;
+    private int mode;
 
     //Traffic generation server host and port
-    private static final String TR_GEN_SERVER_HOST = "172.22.123.21";
-    private static final int TR_GEN_SERVER_PORT = 12345;
+    private static String trGenServerHost;
+    private static int trGenServerPort;
 
     //Data rate at which Trex will generate traffic
-    private static final String dataRate = "1000"; //Mbps
+    private static String dataRate; //Mbps
     
     protected IFloodlightProviderService floodlightProvider;
     protected static Logger logger;
     private IOFSwitchService switchService;
 
-    private int res = 16; //Subnet resolution
-    private long expTimeMillis = 1000; //Exposure time in milliseconds
+    private int res; //Subnet resolution
+    private long expTimeMillis; //Exposure time in milliseconds
     
     ZMQ.Context socketContextClassifier = ZMQ.context(1);
     ZMQ.Socket socketClassifier = socketContextClassifier.socket(ZMQ.REQ);
@@ -109,8 +109,8 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
     private boolean flowsSent = false;
     private boolean deleteMsgSent = false;
     
-    private int measurements = 1; //Number of measurements taken
-    private boolean write = false; //If the measurements are written to a csv or not
+    private int measurements; //Number of measurements taken
+    private boolean write; //If the measurements are written to a csv or not
 
     //Set to true when the subnet granularity cannot become higher inidicating
     //the end of the drilldown
@@ -135,6 +135,23 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
     @Override
     public void init(FloodlightModuleContext context)
             throws FloodlightModuleException {
+
+        Map<String, String> configParams = context.getConfigParams(this);
+
+        res = Integer.parseInt(configParams.get("res"));
+        expTimeMillis = Long.parseLong(configParams.get("expTimeMillis"));
+        dataRate = configParams.get("dataRate");
+        tcprepBGDelay = Integer.parseInt(configParams.get("tcprepBGDelay"));
+        tcprepAttackDelay = Integer.parseInt(configParams.get("tcprepAttackDelay"));
+        tcprepTrafficDelay = Integer.parseInt(configParams.get("tcprepTrafficDelay"));
+        tcprepBGDataRate = Integer.parseInt(configParams.get("tcprepBGDataRate"));
+        tcprepAttackDataRate = Integer.parseInt(configParams.get("tcprepAttackDataRate"));
+        tcprepTrafficDataRate = Integer.parseInt(configParams.get("tcprepTrafficDataRate"));
+        tcprepBGDataRate = Integer.parseInt(configParams.get("tcprepBGDataRate"));
+        trGenServerPort = Integer.parseInt(configParams.get("trGenServerPort"));
+        measurements = Integer.parseInt(configParams.get("measurements"));
+        write = Boolean.parseBoolean(configParams.get("write"));
+        mode = Integer.parseInt(configParams.get("mdoe"));
         
         boolean serverAvailableClassifier = isServerAvailable("localhost", 5555);
         if (serverAvailableClassifier) {
@@ -142,14 +159,14 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
             classifierConnected = true;
         }
 
-        boolean serverAvailableTrGen = isServerAvailable(TR_GEN_SERVER_HOST, TR_GEN_SERVER_PORT);
+        boolean serverAvailableTrGen = isServerAvailable(trGenServerHost, trGenServerPort);
         if (serverAvailableTrGen) {
             System.out.println("Connected to traffic generation server");
             trGenConnected = true;
         }
         
         socketClassifier.connect("tcp://localhost:5555");
-        socketTrGen.connect("tcp://" + TR_GEN_SERVER_HOST + ":" + TR_GEN_SERVER_PORT);
+        socketTrGen.connect("tcp://" + trGenServerHost + ":" + trGenServerPort);
 
         int maskBits = (int) (Math.log(res) / Math.log(2));
         initialSubnets = IpAddrGenerator.generateIps(maskBits);
