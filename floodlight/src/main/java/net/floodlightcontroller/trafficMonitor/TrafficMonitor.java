@@ -148,10 +148,26 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
         tcprepAttackDataRate = Integer.parseInt(configParams.get("tcprepAttackDataRate"));
         tcprepTrafficDataRate = Integer.parseInt(configParams.get("tcprepTrafficDataRate"));
         tcprepBGDataRate = Integer.parseInt(configParams.get("tcprepBGDataRate"));
+        trGenServerHost = configParams.get("trGenServerHost");
         trGenServerPort = Integer.parseInt(configParams.get("trGenServerPort"));
         measurements = Integer.parseInt(configParams.get("measurements"));
         write = Boolean.parseBoolean(configParams.get("write"));
-        mode = Integer.parseInt(configParams.get("mdoe"));
+        mode = Integer.parseInt(configParams.get("mode"));
+
+        System.out.println("Res: " + res);
+        System.out.println("Exp time ms: " + expTimeMillis);
+        System.out.println("Data rate: " + dataRate);
+        System.out.println("BGD delay: " + tcprepBGDelay);
+        System.out.println("Attack delay: " + tcprepAttackDelay);
+        System.out.println("Traffic delay: " + tcprepTrafficDelay);
+        System.out.println("BGD Data rate: " + tcprepBGDataRate);
+        System.out.println("Attack data rate: " + tcprepAttackDataRate);
+        System.out.println("Traffic data rate: " + tcprepTrafficDataRate);
+        System.out.println("Traffic gen server host: " + trGenServerHost);
+        System.out.println("Traffic gen server port: " + trGenServerPort);
+        System.out.println("Measurements: " + measurements);
+        System.out.println("Write: " + write);
+        System.out.println("Mode: " + mode);
         
         boolean serverAvailableClassifier = isServerAvailable("localhost", 5555);
         if (serverAvailableClassifier) {
@@ -174,7 +190,7 @@ public class TrafficMonitor implements IOFMessageListener, IFloodlightModule, IO
         switchService = context.getServiceImpl(IOFSwitchService.class);
         logger = LoggerFactory.getLogger(TrafficMonitor.class);
         
-        logger.info("Rule installer initiated");
+        logger.info("Traffic Monitor initiated");
         addShutdownHook();
     }
 
